@@ -259,7 +259,7 @@ void thread_sleep(int64_t wake_ticks)
   curr->wake_ticks = wake_ticks;
   list_push_back(&sleep_list, &curr->elem); 
   thread_block();
-  schedule();
+  // schedule();
   intr_set_level(old_level);
 }
 
