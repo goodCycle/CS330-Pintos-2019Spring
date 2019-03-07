@@ -20,6 +20,9 @@
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
+//
+static struct list wake_ticks_list;
+
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
@@ -99,8 +102,13 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  /* while (timer_elapsed (start) < ticks) 
+    thread_yield (); */
+  thread_sleep( start + ticks );
+
+  struct ticks_elem *te;
+  te->ticks_to_wake = start + ticks;
+  list_insert_ordered(&wake_ticks_list, &te->elem, ticks_compare, 0);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -130,6 +138,12 @@ timer_print_stats (void)
 {
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
+
+bool ticks_compare (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  return list_entry(a, struct ticks_elem, elem)->ticks_to_wake > list_entry(b, struct ticks_elem, elem)->ticks_to_wake;
+} 
+
 
 /* Timer interrupt handler. */
 static void
@@ -137,6 +151,16 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+
+  if(list_head(&wake_ticks_list) != NULL)
+  {
+    struct ticks_elem *te = list_entry(list_head(&wake_ticks_list), struct ticks_elem, elem);
+    int64_t first_wake_ticks = te->ticks_to_wake;
+    if (first_wake_ticks <= timer_ticks())
+    {
+      thread_wake(first_wake_ticks);
+    }
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
