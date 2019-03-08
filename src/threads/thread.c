@@ -211,6 +211,13 @@ thread_create (const char *name, int priority,
   return tid;
 }
 
+// Compare prioirty of thread
+bool priority_compare (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  return list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority;
+} 
+//
+
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
 
@@ -522,6 +529,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  //
+  list_init(&t->waiting_lock_list);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

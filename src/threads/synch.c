@@ -69,7 +69,9 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+      // list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered(&sema->waiters, &thread_current ()->elem, priority_compare, 0); 
+      //
       thread_block ();
     }
   sema->value--;
@@ -197,6 +199,18 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  //
+  struct list_elem *e, *next;
+  struct semaphore *sema = &lock->semaphore;
+  if (sema->value == 0) {  
+    // Add lock to current_thread's lock_list. This will acquire lock in sema_down()
+    struct thread *curr_thread = thread_current();
+    struct lock_waiter *lock_waiter = malloc(sizeof(lock_waiter));
+    lock_waiter->lock = lock;
+    list_push_back(&curr_thread->waiting_lock_list, &lock_waiter->elem);
+  }
+  //
+
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
 }
@@ -232,6 +246,27 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
+
+  //
+  struct semaphore *sema = &lock->semaphore;
+  struct list *waiters = &sema->waiters;
+  if (!list_empty(waiters)) {
+    struct thread *thread_get_lock = list_entry(list_begin(waiters), struct thread, elem);
+    struct list *waiting_lock_list = &thread_get_lock->waiting_lock_list;
+  
+    struct list_elem *e, *next;
+    if (!list_empty(waiting_lock_list)) {
+      for (e = list_begin(waiting_lock_list); e != list_end(waiting_lock_list); e = next)
+      {
+        next = list_next(e);
+        struct lock_waiter *lock_waiter = list_entry(e, struct lock_waiter, elem);
+        if (&lock_waiter->lock == lock) {
+          list_remove(&lock_waiter->elem);
+          break;
+        }
+      }
+    }
+  }
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
