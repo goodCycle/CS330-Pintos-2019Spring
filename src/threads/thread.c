@@ -28,6 +28,8 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+static struct list sleep_list; //
+extern struct list wake_ticks_list; //
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -95,6 +97,8 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
+  list_init (&sleep_list); //
+  list_init (&wake_ticks_list); //
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -202,6 +206,7 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
+  check_ready_list();
 
   return tid;
 }
@@ -243,6 +248,56 @@ thread_unblock (struct thread *t)
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
+
+//
+void thread_sleep(int64_t wake_ticks)
+{
+  struct thread *curr = thread_current ();
+  enum intr_level old_level;
+
+  //ASSERT (!intr_context ()); 
+  
+  old_level = intr_disable();
+  ASSERT(curr != idle_thread);
+  // curr->status = THREAD_BLOCKED;
+  curr->wake_ticks = wake_ticks;
+  
+  //printf("in thread_sleep prev sleep_list size : %d\n", list_size(&sleep_list));
+  list_push_back(&sleep_list, &curr->elem); 
+  //printf("in thread_sleep next sleep_list size : %d\n", list_size(&sleep_list));
+  
+  thread_block();
+  // schedule();
+  intr_set_level(old_level);
+}
+
+void thread_wake(int64_t wake_ticks)
+{
+  //enum intr_level old_level;
+
+  //ASSERT (!intr_context ());
+
+  //old_level = intr_disable();
+  struct list_elem *e, *next;
+  //printf("in thread_wake prev sleep list length : %d\n", list_size(&sleep_list));
+  for (e = list_begin(&sleep_list); e != list_tail(&sleep_list); e = next)
+  {
+    next = list_next(e);
+    struct thread *t = list_entry(e, struct thread, elem);
+    //printf("in thread_wake sleep_thread_wake_ticks : %d, current : %d\n", t->wake_ticks, wake_ticks);
+    if ( t->wake_ticks <= wake_ticks )
+    {
+      // t->status = THREAD_READY;
+      list_remove(&t->elem);
+      thread_unblock(t);
+      //list_push_back(&ready_list, &t->elem);
+    }
+  }
+  //printf("in thread_wake next sleep list length : %d\n", list_size(&sleep_list));
+  //schedule();
+  //intr_set_level(old_level);
+}
+//
 
 /* Returns the name of the running thread. */
 const char *
@@ -314,11 +369,34 @@ thread_yield (void)
   intr_set_level (old_level);
 }
 
+/* when create thread or set priority, check ready_list priority and curr priority */
+void
+check_ready_list(void)
+{
+  struct thread *curr = thread_current();
+  struct list_elem *e, *next;
+   
+  if(!list_empty(&ready_list) && curr != idle_thread)
+  {
+    for(e = list_begin(&ready_list) ; e != list_tail(&ready_list) ; e = next)
+    {
+      next = list_next(e);
+      struct thread *t = list_entry(e, struct thread, elem);
+      if(t->priority > curr->priority)
+      {
+        thread_yield();
+        break;
+      }
+    }
+  }
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  check_ready_list();  
 }
 
 /* Returns the current thread's priority. */
@@ -470,7 +548,24 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  {
+    //
+    struct thread *hp_thread = list_entry(list_begin(&ready_list), struct thread, elem);
+    struct list_elem *e, *next;
+    for (e = list_begin(&ready_list); e != list_tail(&ready_list) ; e = next)
+    {
+      next = list_next(e);
+      struct thread *t = list_entry(e, struct thread, elem);
+      if(hp_thread->priority < t->priority)
+      {
+        hp_thread = t;
+      }
+    }
+    list_remove(&hp_thread->elem);
+    return hp_thread;
+    
+    //return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page

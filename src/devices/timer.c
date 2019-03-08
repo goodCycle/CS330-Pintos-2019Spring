@@ -20,6 +20,9 @@
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
+//
+struct list wake_ticks_list;
+
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
@@ -96,11 +99,41 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
 
-  ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  if(ticks > 0)
+  {
+    int64_t start = timer_ticks ();
+  
+    ASSERT (intr_get_level () == INTR_ON);
+  /* while (timer_elapsed (start) < ticks) 
+    thread_yield (); */
+
+    //enum intr_level = old_level;
+    //old_level = intr_disable();
+
+    struct ticks_elem *te = malloc(sizeof(te));
+    te->ticks_to_wake = start + ticks;
+    int dup_check = 0;
+
+    struct list_elem *e, *next;
+    for (e = list_begin(&wake_ticks_list); e != list_end(&wake_ticks_list); e = next)
+    {
+      next = list_next(e);
+      struct ticks_elem *t = list_entry(e, struct ticks_elem, elem);
+      if(t->ticks_to_wake == start+ticks)
+      {
+        dup_check = 1; 
+        break;
+      }
+    }
+    if (dup_check == 0)
+    {
+      list_insert_ordered(&wake_ticks_list, &te->elem, ticks_compare, 0); 
+    }
+    //intr_set_level(old_level);
+    
+    thread_sleep( start + ticks );
+  }
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -130,6 +163,12 @@ timer_print_stats (void)
 {
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
+
+bool ticks_compare (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  return list_entry(a, struct ticks_elem, elem)->ticks_to_wake < list_entry(b, struct ticks_elem, elem)->ticks_to_wake;
+} 
+
 
 /* Timer interrupt handler. */
 static void
@@ -137,6 +176,17 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+
+  if(!list_empty(&wake_ticks_list))
+  {
+    struct ticks_elem *te = list_entry(list_begin(&wake_ticks_list), struct ticks_elem, elem);
+    int64_t first_wake_ticks = te->ticks_to_wake;
+    if (first_wake_ticks <= timer_ticks())
+    {
+      list_pop_front(&wake_ticks_list);
+      thread_wake(first_wake_ticks);
+    }
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
