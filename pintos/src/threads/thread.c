@@ -206,6 +206,79 @@ thread_create (const char *name, int priority,
   return tid;
 }
 
+// Priority Donation
+void priority_donation(struct thread *giver)
+{
+  if(!list_empty(&giver->waiting_lock_list))
+  {
+    struct list_elem *e;
+    for(e = list_begin(&giver->waiting_lock_list); e != list_end(&giver->waiting_lock_list); e = list_next(e))
+    {
+      struct lock_waiter *lock_waiter = list_entry(e, struct lock_waiter, elem);
+      // struct lock *l = lock_waiter->lock;
+      // struct thread *holder_thread = l->holder;
+      struct thread *holder_thread = lock_waiter->lock->holder;
+      if(holder_thread->initial_priority < giver->priority)
+      {
+        struct priority_elem *giver_priority_elem = malloc(sizeof(giver_priority_elem));
+        giver_priority_elem->priority = giver->priority;
+        list_insert_ordered(&holder_thread->old_priority_list, &giver_priority_elem->elem, priority_elem_compare, 0); 
+        holder_thread->priority = giver->priority;
+        priority_donation(holder_thread);
+      }
+    }
+  }
+}
+
+void priority_rollback(struct lock *lock)
+{
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
+  struct thread *curr_thread = thread_current();
+  struct semaphore *semaphore = &lock->semaphore;
+  struct list *waiters = &semaphore->waiters;
+  
+  struct list_elem *waiter_elem, *waiter_next;
+  for (waiter_elem = list_begin(waiters); waiter_elem != list_end(waiters); waiter_elem = waiter_next)
+  {
+    waiter_next = list_next(waiter_elem);
+    int donor_priority = list_entry(waiter_elem, struct thread, elem)->priority;
+    if ((curr_thread->initial_priority < donor_priority) && (list_size(&curr_thread->old_priority_list) > 0)) {
+      // list_pop_front(&curr_thread->old_priority_list);
+      struct list_elem *e, *next;
+      for (e = list_begin(&curr_thread->old_priority_list); e != list_tail(&curr_thread->old_priority_list) ; e = next)
+      {
+        next = list_next(e);
+        struct priority_elem *priority_elem = list_entry(e, struct priority_elem, elem);
+        if (priority_elem->priority == donor_priority) {
+          list_remove(e);
+        }
+      }
+      if (!list_empty(&curr_thread->old_priority_list)) {
+        int rollback_priority = list_entry(list_begin(&curr_thread->old_priority_list), struct priority_elem, elem)->priority;
+        curr_thread->priority = rollback_priority;
+      }
+      else {
+        curr_thread->priority = curr_thread->initial_priority;
+      }
+    }
+  }
+  intr_set_level (old_level); 
+}
+//
+// Compare prioirty of thread
+bool priority_compare (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  return list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority;
+}
+
+bool priority_elem_compare (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  return list_entry(a, struct priority_elem, elem)->priority > list_entry(b, struct priority_elem, elem)->priority;
+}
+//
+
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
    This function must be called with interrupts turned off.  It
@@ -512,6 +585,11 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  //
+  list_init(&t->waiting_lock_list);
+  list_init(&t->old_priority_list);
+  t->initial_priority = priority;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -540,6 +618,9 @@ next_thread_to_run (void)
   else
   {
     //
+    enum intr_level old_level;
+    old_level = intr_disable ();
+    int high_priority = 0;
     struct thread *hp_thread = list_entry(list_begin(&ready_list), struct thread, elem);
     struct list_elem *e, *next;
     for (e = list_begin(&ready_list); e != list_tail(&ready_list) ; e = next)
@@ -551,10 +632,24 @@ next_thread_to_run (void)
         hp_thread = t;
       }
     }
-    list_remove(&hp_thread->elem);
-    return hp_thread;
+    high_priority = hp_thread->priority;
+    // priority_donation(hp_thread);
+    for (e = list_begin(&ready_list); e != list_tail(&ready_list) ; e = next)
+    {
+      next = list_next(e);
+      struct thread *t = list_entry(e, struct thread, elem);
+      if (list_empty(&t->waiting_lock_list) && t->priority == high_priority)
+      {
+        list_remove(&t->elem);
+        intr_set_level (old_level);
+        return t;
+      }
+    }
     
-    //return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    // list_remove(&hp_thread->elem);
+    // return hp_thread;
+    
+    // return list_entry (list_pop_front (&ready_list), struct thread, elem);
   }
 }
 
