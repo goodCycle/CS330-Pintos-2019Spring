@@ -64,6 +64,7 @@ sema_down (struct semaphore *sema)
   while (sema->value == 0) 
     {
       // list_push_back (&sema->waiters, &thread_current ()->elem);
+      // TODO: sema waiters에 thread 넣을 때 initial priority 아닌 priority로 비고해서 넣어도 되나?
       list_insert_ordered(&sema->waiters, &thread_current ()->elem, priority_compare, 0); 
       //
       thread_block ();
@@ -198,7 +199,7 @@ lock_acquire (struct lock *lock)
     struct lock_waiter *lock_waiter = malloc(sizeof(lock_waiter));
     lock_waiter->lock = lock;
     list_push_back(&curr_thread->waiting_lock_list, &lock_waiter->elem);
-
+    // Do priority donation
     priority_donation(curr_thread);
   }
   //
@@ -265,6 +266,7 @@ lock_release (struct lock *lock)
   sema_up (&lock->semaphore);
 
   intr_set_level (old_level);
+  // 이건 있어야 됨..
   check_ready_list(); 
 }
 

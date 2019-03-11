@@ -218,10 +218,12 @@ void priority_donation(struct thread *giver)
       // struct lock *l = lock_waiter->lock;
       // struct thread *holder_thread = l->holder;
       struct thread *holder_thread = lock_waiter->lock->holder;
+      // TODO: holder의 initial priority가 맞나? 왜 initial priority?
       if(holder_thread->initial_priority < giver->priority)
       {
         struct priority_elem *giver_priority_elem = malloc(sizeof(giver_priority_elem));
         giver_priority_elem->priority = giver->priority;
+        giver_priority_elem->lock = lock_waiter->lock;
         list_insert_ordered(&holder_thread->old_priority_list, &giver_priority_elem->elem, priority_elem_compare, 0); 
         holder_thread->priority = giver->priority;
         priority_donation(holder_thread);
@@ -251,7 +253,10 @@ void priority_rollback(struct lock *lock)
       {
         next = list_next(e);
         struct priority_elem *priority_elem = list_entry(e, struct priority_elem, elem);
-        if (priority_elem->priority == donor_priority) {
+        /* if (priority_elem->priority == donor_priority) {
+          list_remove(e);
+        } */
+        if (priority_elem->lock == lock) {
           list_remove(e);
         }
       }
@@ -638,6 +643,7 @@ next_thread_to_run (void)
     {
       next = list_next(e);
       struct thread *t = list_entry(e, struct thread, elem);
+      // this highest thread doesn't wating any lock
       if (list_empty(&t->waiting_lock_list) && t->priority == high_priority)
       {
         list_remove(&t->elem);

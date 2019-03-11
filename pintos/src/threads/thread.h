@@ -105,6 +105,7 @@ struct thread
 //
 struct priority_elem {
   int priority;
+  struct lock *lock;
   struct list_elem elem;
 };
 //
