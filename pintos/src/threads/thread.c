@@ -219,6 +219,7 @@ void priority_donation(struct thread *giver)
       // struct thread *holder_thread = l->holder;
       struct thread *holder_thread = lock_waiter->lock->holder;
       // TODO: holder의 initial priority가 맞나? 왜 initial priority?
+      // 생각해보면 lock정보를 넣게 되면 list 로 old를 저장할 필요가 있나? lock A에 대한 가장 높은것만 기억하는게 best?!
       if(holder_thread->initial_priority < giver->priority)
       {
         struct priority_elem *giver_priority_elem = malloc(sizeof(giver_priority_elem));
@@ -466,7 +467,14 @@ check_ready_list(void)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  //
+  struct thread *curr = thread_current();
+  if (list_empty(&curr->old_priority_list))
+  {
+    curr->priority = new_priority;
+  }
+  curr->initial_priority = new_priority;
+  //
   check_ready_list();  
 }
 

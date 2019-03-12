@@ -1,6 +1,7 @@
 #ifndef THREADS_SYNCH_H
 #define THREADS_SYNCH_H
 
+#include <debug.h>
 #include <list.h>
 #include <stdbool.h>
 
@@ -10,6 +11,10 @@ struct semaphore
     unsigned value;             /* Current value. */
     struct list waiters;        /* List of waiting threads. */
   };
+
+//
+//bool sema_waiter_priority_compare (const struct list_elem *a, const struct list_elem *b, void *aux);
+bool sema_elem_priority_compare (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 void sema_init (struct semaphore *, unsigned value);
 void sema_down (struct semaphore *);
