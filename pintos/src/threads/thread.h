@@ -89,6 +89,8 @@ struct thread
     struct list waiting_lock_list;      /* List of locks that thread want to acquire */
     struct list old_priority_list;      /* List of the priority that the thread get from other thread  */
     int initial_priority;               /* Initial priority of the thread */
+    int recent_cpu;                     /* Cpu time that the thread is runnung */
+    int nice;                           /* Value that the thread can tolerate in ready queue */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */

@@ -11,6 +11,9 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+
+#include "threads/fixed-point.h"
+
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -74,6 +77,9 @@ static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+//
+int load_avg;
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -102,6 +108,9 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+
+  //
+  load_avg = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -485,27 +494,76 @@ thread_get_priority (void)
   return thread_current ()->priority;
 }
 
+
+// priority = PRI_MAX - (recent_cpu / 4) - (nice * 2)
+int
+priority_recalculate_with_new_nice(struct thread *thread)
+{
+  int cal_priority =
+    convert_x_to_int_near(
+      sub_x_y(
+        sub_x_y(convert_n_to_fixed(PRI_MAX), div_n_m(thread->recent_cpu, 4)),
+        mul_n_m(thread->nice, 2)
+      )
+    );
+
+  return cal_priority;
+}
+
+//recent_cpu = (2*load_avg)/(2*load_avg + 1) * recent_cpu + nice
+void
+calculate_recent_cpu(struct thread *thread)
+{
+  thread->recent_cpu = 
+    convert_x_to_int_near(
+      add_x_n(
+        mul_x_n(
+          div_x_y(
+              mul_n_m(load_avg,2),
+              add_x_n(mul_n_m(load_avg, 2), 1)),
+          thread->recent_cpu),
+        thread->nice)
+    );
+}
+
+//load_avg = (59/60)*load_avg + (1/60)*ready_threads
+void
+calculate_load_avg()
+{
+  int ready_threads = (list_empty(&ready_list) ? 1 : 1+list_size(&ready_list));
+  load_avg = 
+    convert_x_to_int_near(
+      add_x_y(
+        mul_x_n(div_n_m(59,60), load_avg),
+        mul_x_n(div_n_m(1,60), ready_threads)
+      )
+    );
+}
+//
+
 /* Sets the current thread's nice value to NICE. */
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  struct thread *curr_thread = thread_current();
+  curr_thread->nice = nice;
+  int cal_priority = priority_recalculate_with_new_nice(curr_thread);
+  thread_set_priority(cal_priority);
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  struct thread *curr_thread = thread_current();
+  return curr_thread->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return convert_x_to_int_near(mul_n_m(load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -513,7 +571,8 @@ int
 thread_get_recent_cpu (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  struct thread *curr_thread = thread_current();
+  return convert_x_to_int_near(mul_n_m(curr_thread->recent_cpu, 100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
