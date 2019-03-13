@@ -91,6 +91,7 @@ struct thread
     int initial_priority;               /* Initial priority of the thread */
     int recent_cpu;                     /* Cpu time that the thread is runnung */
     int nice;                           /* Value that the thread can tolerate in ready queue */
+    struct list_elem all_list_elem;     /* List element of all_list */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -147,6 +148,12 @@ void thread_yield (void);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+
+//
+int priority_recalculate_with_new_nice(struct thread *thread);
+void calculate_recent_cpu(struct thread *thread);
+void calculate_load_avg();
+//
 
 int thread_get_nice (void);
 void thread_set_nice (int);

@@ -7,6 +7,7 @@
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "threads/fixed-point.h"
   
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -22,6 +23,7 @@ static int64_t ticks;
 
 //
 struct list wake_ticks_list;
+extern struct list all_list;
 
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */

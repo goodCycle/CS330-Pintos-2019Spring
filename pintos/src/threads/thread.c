@@ -13,6 +13,7 @@
 #include "threads/vaddr.h"
 
 #include "threads/fixed-point.h"
+#include "devices/timer.h"
 
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -33,6 +34,7 @@
 static struct list ready_list;
 static struct list sleep_list; //
 extern struct list wake_ticks_list; //
+struct list all_list;         /* list of thread running, ready, blokced */
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -78,7 +80,7 @@ void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
 //
-int load_avg;
+static int load_avg;
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -102,6 +104,7 @@ thread_init (void)
   list_init (&ready_list);
   list_init (&sleep_list); //
   list_init (&wake_ticks_list); //
+  list_init (&all_list); //
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -150,6 +153,33 @@ thread_tick (void)
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
+  
+  if (thread_mlfqs) {
+    struct thread *curr_thread = thread_current();
+    if (timer_ticks() % TIMER_FREQ == 0) {
+      calculate_load_avg();
+      struct list_elem *e, *next;
+      // printf("all list size %d \n", list_size(&all_list));
+      for (e = list_begin(&all_list); e != list_end(&all_list); e = next)
+      {
+        next = list_next(e);
+        struct thread *t = list_entry(e, struct thread, elem);
+        calculate_recent_cpu(t);
+      }
+    }
+    if (curr_thread->status == THREAD_RUNNING && curr_thread != idle_thread) {
+      curr_thread->recent_cpu = add_x_n(curr_thread->recent_cpu, 1);
+    }
+    if ((timer_ticks() % 4) == 0) {
+      struct list_elem *e, *next;
+      for (e = list_begin(&all_list); e != list_end(&all_list); e = next)
+      {
+        next = list_next(e);
+        struct thread *t = list_entry(e, struct thread, elem);
+        t->priority = priority_recalculate_with_new_nice(t);
+      }
+    }          
+  }
 }
 
 /* Prints thread statistics. */
@@ -427,6 +457,9 @@ thread_exit (void)
   /* Just set our status to dying and schedule another process.
      We will be destroyed during the call to schedule_tail(). */
   intr_disable ();
+  // if (thread_mlfqs) {
+  list_remove (&thread_current()->all_list_elem);
+  // }
   thread_current ()->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();
@@ -499,45 +532,69 @@ thread_get_priority (void)
 int
 priority_recalculate_with_new_nice(struct thread *thread)
 {
-  int cal_priority =
-    convert_x_to_int_near(
-      sub_x_y(
-        sub_x_y(convert_n_to_fixed(PRI_MAX), div_n_m(thread->recent_cpu, 4)),
-        mul_n_m(thread->nice, 2)
-      )
-    );
-
-  return cal_priority;
+  if (thread != idle_thread) {
+    int cal_priority =
+      convert_x_to_int_near(
+        sub_x_y(
+          sub_x_y(convert_n_to_fixed(PRI_MAX), div_x_n(thread->recent_cpu, 4)),
+          mul_n_m(thread->nice, 2)
+        )
+      );
+    if (cal_priority > PRI_MAX) {
+      return PRI_MAX;
+    } else if (cal_priority < PRI_MIN) {
+      return PRI_MIN;
+    } else {
+      return cal_priority;
+    }
+  }
 }
 
 //recent_cpu = (2*load_avg)/(2*load_avg + 1) * recent_cpu + nice
 void
 calculate_recent_cpu(struct thread *thread)
 {
-  thread->recent_cpu = 
-    convert_x_to_int_near(
-      add_x_n(
-        mul_x_n(
-          div_x_y(
-              mul_n_m(load_avg,2),
-              add_x_n(mul_n_m(load_avg, 2), 1)),
-          thread->recent_cpu),
-        thread->nice)
-    );
+  if(thread != idle_thread) {
+    int coeff_recent_cpu_1 = mul_x_n(load_avg, 2);
+    int coeff_recent_cpu_2 = add_x_n(coeff_recent_cpu_1, 1);
+    // int coeff_recent_cpu_final = div_x_y(coeff_recent_cpu_1, coeff_recent_cpu_2);
+    int recent_cpu = thread->recent_cpu;
+    thread->recent_cpu = 
+      // convert_x_to_int_near(
+        add_x_n(
+          mul_x_y(
+            div_x_y(coeff_recent_cpu_1, coeff_recent_cpu_2),
+            recent_cpu),
+          thread->nice);
+      // );
+  }
 }
 
 //load_avg = (59/60)*load_avg + (1/60)*ready_threads
 void
 calculate_load_avg()
 {
-  int ready_threads = (list_empty(&ready_list) ? 1 : 1+list_size(&ready_list));
+  struct thread *curr_thread = thread_current();
+  int ready_threads;
+  if(curr_thread != idle_thread)
+  {
+    ready_threads = (list_empty(&ready_list) ? 1 : 1+list_size(&ready_list));
+    // printf("ready threads %d \n", ready_threads);
+  } else {
+    ready_threads = (list_empty(&ready_list) ? 0 : 0+list_size(&ready_list));
+  }
+  // printf("ready threads %d \n", ready_threads);
+  int mul_first = mul_x_y(div_n_m(59,60), load_avg);
+  int mul_second = mul_x_n(div_n_m(1,60), ready_threads);
   load_avg = 
-    convert_x_to_int_near(
+    // convert_x_to_int_near(
       add_x_y(
-        mul_x_n(div_n_m(59,60), load_avg),
-        mul_x_n(div_n_m(1,60), ready_threads)
-      )
-    );
+        mul_first,
+        mul_second
+      );
+    // );
+  // printf("div_n_m(1,60) %d \n", div_n_m(1,60));
+  // printf("after calculate load avg %d \n", load_avg);
 }
 //
 
@@ -545,10 +602,21 @@ calculate_load_avg()
 void
 thread_set_nice (int nice UNUSED) 
 {
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
   struct thread *curr_thread = thread_current();
+  if (nice > 20) {
+    nice = 20;
+  }
+  if (nice < -20) {
+    nice = -20;
+  }
   curr_thread->nice = nice;
   int cal_priority = priority_recalculate_with_new_nice(curr_thread);
   thread_set_priority(cal_priority);
+
+  intr_set_level (old_level); 
 }
 
 /* Returns the current thread's nice value. */
@@ -563,7 +631,7 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  return convert_x_to_int_near(mul_n_m(load_avg, 100));
+  return convert_x_to_int_near(mul_x_n(load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -572,7 +640,8 @@ thread_get_recent_cpu (void)
 {
   /* Not yet implemented. */
   struct thread *curr_thread = thread_current();
-  return convert_x_to_int_near(mul_n_m(curr_thread->recent_cpu, 100));
+  // printf("current thread recent cput %d \n", curr_thread->recent_cpu);
+  return convert_x_to_int_near(mul_x_n(curr_thread->recent_cpu, 100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -662,6 +731,20 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init(&t->waiting_lock_list);
   list_init(&t->old_priority_list);
   t->initial_priority = priority;
+
+  list_push_back(&all_list, &t->all_list_elem);
+
+  if (thread_mlfqs) {
+    if (t == initial_thread) {
+      t->nice = 0;
+      t->recent_cpu = convert_n_to_fixed(0);
+    } else {
+      t->nice = thread_get_nice();
+      t->recent_cpu = thread_get_recent_cpu();
+      // t->recent_cpu = thread_current()->recent_cpu;
+    }
+    // t->priority = priority_recalculate_with_new_nice(t);
+  }
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
