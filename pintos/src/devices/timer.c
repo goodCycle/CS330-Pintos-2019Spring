@@ -110,7 +110,7 @@ timer_sleep (int64_t ticks)
   /* while (timer_elapsed (start) < ticks) 
     thread_yield (); */
 
-    //enum intr_level = old_level;
+    //enum intr_level old_level;
     //old_level = intr_disable();
 
     struct ticks_elem *te = malloc(sizeof(te));
@@ -132,9 +132,9 @@ timer_sleep (int64_t ticks)
     {
       list_insert_ordered(&wake_ticks_list, &te->elem, ticks_compare, 0); 
     }
-    //intr_set_level(old_level);
-    
+
     thread_sleep( start + ticks );
+    //intr_set_level(old_level);
   }
 }
 

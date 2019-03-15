@@ -224,7 +224,7 @@ lock_acquire (struct lock *lock)
     lock_waiter->lock = lock;
     list_push_back(&curr_thread->waiting_lock_list, &lock_waiter->elem);
     // Do priority donation
-    priority_donation(curr_thread);
+    if(!thread_mlfqs) priority_donation(curr_thread);
   }
   //
 
@@ -285,7 +285,7 @@ lock_release (struct lock *lock)
       }
     }
   }
-  priority_rollback(lock);
+  if(!thread_mlfqs) priority_rollback(lock);
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 

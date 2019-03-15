@@ -111,6 +111,7 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  // printf("initial_thread->tid : %d\n", initial_thread->tid);
 
   //
   load_avg = 0;
@@ -157,26 +158,30 @@ thread_tick (void)
   if (thread_mlfqs) {
     struct thread *curr_thread = thread_current();
     if (timer_ticks() % TIMER_FREQ == 0) {
+      //printf("In Update curr->recent_cpu\n");
       calculate_load_avg();
       struct list_elem *e, *next;
       // printf("all list size %d \n", list_size(&all_list));
       for (e = list_begin(&all_list); e != list_end(&all_list); e = next)
       {
         next = list_next(e);
-        struct thread *t = list_entry(e, struct thread, elem);
+        struct thread *t = list_entry(e, struct thread, all_list_elem);
         calculate_recent_cpu(t);
+        //printf("t->tid : %d\n", t->tid);
       }
     }
     if (curr_thread->status == THREAD_RUNNING && curr_thread != idle_thread) {
       curr_thread->recent_cpu = add_x_n(curr_thread->recent_cpu, 1);
+      // printf("add 1 curr_thread->recent_cpu is : %d\n", curr_thread->recent_cpu);
     }
     if ((timer_ticks() % 4) == 0) {
       struct list_elem *e, *next;
       for (e = list_begin(&all_list); e != list_end(&all_list); e = next)
       {
         next = list_next(e);
-        struct thread *t = list_entry(e, struct thread, elem);
+        struct thread *t = list_entry(e, struct thread, all_list_elem);
         t->priority = priority_recalculate_with_new_nice(t);
+        //printf("t->priority : %d, t->recent_cpu : %d\n", t->priority, t->recent_cpu);
       }
     }          
   }
@@ -223,7 +228,8 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-
+  //printf("tid : %d\n", tid);
+  
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -366,7 +372,7 @@ void thread_sleep(int64_t wake_ticks)
   struct thread *curr = thread_current ();
   enum intr_level old_level;
 
-  //ASSERT (!intr_context ()); 
+  // ASSERT (!intr_context ()); 
   
   old_level = intr_disable();
   ASSERT(curr != idle_thread);
@@ -732,7 +738,7 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init(&t->old_priority_list);
   t->initial_priority = priority;
 
-  list_push_back(&all_list, &t->all_list_elem);
+  list_push_back(&all_list, &t->all_list_elem);  
 
   if (thread_mlfqs) {
     if (t == initial_thread) {
@@ -740,8 +746,8 @@ init_thread (struct thread *t, const char *name, int priority)
       t->recent_cpu = convert_n_to_fixed(0);
     } else {
       t->nice = thread_get_nice();
-      t->recent_cpu = thread_get_recent_cpu();
-      // t->recent_cpu = thread_current()->recent_cpu;
+      // t->recent_cpu = thread_get_recent_cpu();
+      t->recent_cpu = thread_current()->recent_cpu;
     }
     // t->priority = priority_recalculate_with_new_nice(t);
   }
