@@ -1,0 +1,5 @@
+Prototype mismatch: sub main::SIGVTALRM () vs none at /root/pintos/src/utils/pintos line 872.
+Constant subroutine SIGVTALRM redefined at /root/pintos/src/utils/pintos line 864.
+Could not access KVM kernel module: No such file or directory
+failed to initialize KVM: No such file or directory
+Back to tcg accelerator.

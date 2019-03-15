@@ -1,0 +1,27 @@
+Copying tests/userprog/read-normal into /tmp/VaPYOItCP6.dsk...
+Copying ../../tests/userprog/sample.txt into /tmp/VaPYOItCP6.dsk...
+Writing command line to /tmp/GZz2VPn3uv.dsk...
+qemu -hda /tmp/GZz2VPn3uv.dsk -hdb /tmp/r0juWUEa8s.dsk -hdc /tmp/VaPYOItCP6.dsk -m 4 -net none -nographic -monitor null
+Kernel command line: -q -f put read-normal put sample.txt run read-normal
+Pintos booting with 4,096 kB RAM...
+375 pages available in kernel pool.
+374 pages available in user pool.
+Calibrating timer...  209,510,400 loops/s.
+hd0:0: detected 129 sector (64 kB) disk, model "QEMU HARDDISK", serial "QM00001"
+hd0:1: detected 4,032 sector (1 MB) disk, model "QEMU HARDDISK", serial "QM00002"
+hd1:0: detected 108 sector (54 kB) disk, model "QEMU HARDDISK", serial "QM00003"
+Formatting file system...done.
+Boot complete.
+Putting 'read-normal' into the file system...
+Putting 'sample.txt' into the file system...
+Executing 'read-normal':
+Execution of 'read-normal' complete.
+Timer: 85 ticks
+Thread: 0 idle ticks, 85 kernel ticks, 0 user ticks
+hd0:0: 0 reads, 0 writes
+hd0:1: 57 reads, 226 writes
+hd1:0: 108 reads, 0 writes
+Console: 814 characters output
+Keyboard: 0 keys pressed
+Exception: 0 page faults
+Powering off...

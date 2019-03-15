@@ -1,0 +1,25 @@
+Copying tests/userprog/create-empty into /tmp/qUKopkDic6.dsk...
+Writing command line to /tmp/VWU_5rEV59.dsk...
+qemu -hda /tmp/VWU_5rEV59.dsk -hdb /tmp/8X17fK1V72.dsk -hdc /tmp/qUKopkDic6.dsk -m 4 -net none -nographic -monitor null
+Kernel command line: -q -f put create-empty run create-empty
+Pintos booting with 4,096 kB RAM...
+375 pages available in kernel pool.
+374 pages available in user pool.
+Calibrating timer...  157,081,600 loops/s.
+hd0:0: detected 129 sector (64 kB) disk, model "QEMU HARDDISK", serial "QM00001"
+hd0:1: detected 4,032 sector (1 MB) disk, model "QEMU HARDDISK", serial "QM00002"
+hd1:0: detected 105 sector (52 kB) disk, model "QEMU HARDDISK", serial "QM00003"
+Formatting file system...done.
+Boot complete.
+Putting 'create-empty' into the file system...
+Executing 'create-empty':
+Execution of 'create-empty' complete.
+Timer: 85 ticks
+Thread: 0 idle ticks, 85 kernel ticks, 0 user ticks
+hd0:0: 0 reads, 0 writes
+hd0:1: 30 reads, 218 writes
+hd1:0: 105 reads, 0 writes
+Console: 759 characters output
+Keyboard: 0 keys pressed
+Exception: 0 page faults
+Powering off...

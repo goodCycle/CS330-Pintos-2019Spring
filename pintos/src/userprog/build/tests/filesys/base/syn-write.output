@@ -1,0 +1,27 @@
+Copying tests/filesys/base/syn-write into /tmp/RpMu3eaw0j.dsk...
+Copying tests/filesys/base/child-syn-wrt into /tmp/RpMu3eaw0j.dsk...
+Writing command line to /tmp/Jmmx4sPnAz.dsk...
+qemu -hda /tmp/Jmmx4sPnAz.dsk -hdb /tmp/BsPwzdyxti.dsk -hdc /tmp/RpMu3eaw0j.dsk -m 4 -net none -nographic -monitor null
+Kernel command line: -q -f put syn-write put child-syn-wrt run syn-write
+Pintos booting with 4,096 kB RAM...
+375 pages available in kernel pool.
+374 pages available in user pool.
+Calibrating timer...  209,510,400 loops/s.
+hd0:0: detected 129 sector (64 kB) disk, model "QEMU HARDDISK", serial "QM00001"
+hd0:1: detected 4,032 sector (1 MB) disk, model "QEMU HARDDISK", serial "QM00002"
+hd1:0: detected 230 sector (115 kB) disk, model "QEMU HARDDISK", serial "QM00003"
+Formatting file system...done.
+Boot complete.
+Putting 'syn-write' into the file system...
+Putting 'child-syn-wrt' into the file system...
+Executing 'syn-write':
+Execution of 'syn-write' complete.
+Timer: 120 ticks
+Thread: 0 idle ticks, 120 kernel ticks, 0 user ticks
+hd0:0: 0 reads, 0 writes
+hd0:1: 57 reads, 470 writes
+hd1:0: 230 reads, 0 writes
+Console: 813 characters output
+Keyboard: 0 keys pressed
+Exception: 0 page faults
+Powering off...
