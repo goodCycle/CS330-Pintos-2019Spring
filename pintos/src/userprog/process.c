@@ -40,15 +40,37 @@ process_execute (const char *file_name)
   strlcpy(fn_copy, file_name, PGSIZE);
 
   //
+  char *file_copy = palloc_get_page(0);
+  if(file_copy == NULL)
+	  return TID_ERROR;
+  strlcpy(file_copy, file_name, strlen(file_name)+1);
+
   char *save_ptr;
-  char *file_name_only = strtok_r(file_name, " ", &save_ptr);
+  char *file_name_only = strtok_r(file_copy, " ", &save_ptr);
   if (file_name_only == NULL) {
     file_name_only = file_name;
   }
   //
 
   /* Create a new thread to execute FILE_NAME. */
+  //
   tid = thread_create (file_name_only, PRI_DEFAULT, start_process, fn_copy);
+  struct thread *curr = thread_current();
+  struct list_elem *e, *next;
+  struct thread *child_thread;
+  if (!list_empty(&curr->child_list)) {
+    for (e = list_begin(&curr->child_list); e != list_end(&curr->child_list); e = next) {
+      next = list_next(e);
+      child_thread = list_entry(e, struct thread, child_elem);
+      if (child_thread->tid == tid) {
+        break;
+      }
+    }
+    sema_down(&child_thread->child_load_sema);
+    if (child_thread->load_check == 0) {
+      tid = TID_ERROR;
+    }
+  }
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -74,7 +96,15 @@ start_process (void *f_name)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
- 
+  // 
+  if (success) {
+    thread_current()->load_check = 1;
+  } else {
+    thread_current()->load_check = 0;
+  }
+  sema_up(&thread_current()->child_load_sema); // 자식이 로드되고 부모가 exec 되야함.
+  //
+
   /* If load failed, quit. */
   palloc_free_page (file_name);  //
 
@@ -100,21 +130,29 @@ void push_stack_arguments(char* file_name, char* file_arguments, void **esp){
     while((argument_ptr = strchr(argument_ptr, ' ')) != NULL) {
       argc++;
       argument_ptr++;
+      while (argument_ptr[0] == ' ') {
+        argument_ptr += 1;
+      }
     }
     argc += 1;
   }
-  
   // Store the address of arguments that it's value is stored.
   int i;
   int total_length = 0;
+  int cnt = 1;
   uint32_t *arg_address = malloc(sizeof(uint32_t)*argc);
   memset(arg_address, 0, sizeof(arg_address));
   int number_of_arguments = argc - 1;
   if (number_of_arguments > 1) {
     for (i = argc-1; i >= 2; i--) {
       char* last_word = strrchr(file_arguments, ' ');
-      *last_word = '\0';
-      last_word = last_word + 1;
+      cnt = 1;
+      while(*last_word == ' '){
+        *last_word = '\0';
+        cnt += 1;
+        last_word -= 1;
+      }
+      last_word = last_word + cnt;
       *esp -= strlen(last_word)+1;
       arg_address[i] = *esp;
       strlcpy(*esp, last_word, strlen(last_word)+1);
@@ -181,8 +219,9 @@ void push_stack_arguments(char* file_name, char* file_arguments, void **esp){
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  while(1);
-  /* int has_child = 0;
+  // while (1);
+  // check child_tid is valid
+  int has_child = 0;
   struct thread *curr = thread_current();
   struct thread *t;
   struct list_elem *e, *next;
@@ -198,11 +237,12 @@ process_wait (tid_t child_tid UNUSED)
   if (!has_child) {
     return -1;
   }
-  while (1) {
-    if (t->status == THREAD_DYING) {
-      return t->exit_status;
-    }
-  } */
+
+  sema_down(&t->child_alive_sema);
+  int child_exit_status = t->exit_status;
+  sema_up(&t->parent_wait_in_sema);
+
+  return child_exit_status;
 }
 
 /* Free the current process's resources. */
@@ -342,9 +382,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   // Split file name
-  char *file_name_only = file_name;
   char *save_ptr;
+  char *file_name_only = palloc_get_page(0);
+  if(file_name_only == NULL)
+	  return TID_ERROR;
+  strlcpy(file_name_only, file_name, strlen(file_name)+1);
   file_name_only = strtok_r(file_name_only, " ", &save_ptr);
+
   if (file_name_only == NULL) {
     file_name_only = file_name;
   }
@@ -432,7 +476,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (file_name_only, save_ptr, esp)) // change arguments of setup_stack
     goto done;
-  hex_dump(*esp, *esp, 100, 1);
+
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 

@@ -203,8 +203,9 @@ thread_create (const char *name, int priority,
 
   //
   struct thread *curr = thread_current();
-  list_push_back(&thread_current()->child_list, &t->child_elem);
- 
+  list_push_back(&curr->child_list, &t->child_elem);
+  sema_down(&t->child_alive_sema);
+
   /* Add to run queue. */
   thread_unblock (t);
 
@@ -289,12 +290,19 @@ thread_exit (void)
 {
   ASSERT (!intr_context ());
 
-  //
-  list_remove(&thread_current()->child_elem);
 
 #ifdef USERPROG
   process_exit ();
 #endif
+
+  //
+  // printf("thread_exit 1 \n");
+  sema_up(&thread_current()->child_alive_sema);
+  // printf("thread_exit 2 \n");
+  sema_down(&thread_current()->parent_wait_in_sema);
+  // printf("thread_exit 3 \n");
+
+  list_remove(&thread_current()->child_elem);
 
   /* Just set our status to dying and schedule another process.
      We will be destroyed during the call to schedule_tail(). */
@@ -454,8 +462,12 @@ init_thread (struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
 
   //
+  t->user_fd = 2;
   list_init(&t->child_list);
-
+  list_init(&t->fd_list);
+  sema_init(&t->child_alive_sema, 1);
+  sema_init(&t->parent_wait_in_sema, 0);
+  sema_init(&t->child_load_sema, 0);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

@@ -5,6 +5,9 @@
 #include <list.h>
 #include <stdint.h>
 
+//
+#include "threads/synch.h"
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -80,6 +83,14 @@ typedef int tid_t;
    only because they are mutually exclusive: only a thread in the
    ready state is on the run queue, whereas only a thread in the
    blocked state is on a semaphore wait list. */
+
+//
+struct file_info {
+  int fd;
+  struct file *file;
+  struct list_elem elem;
+};
+
 struct thread
   {
     /* Owned by thread.c. */
@@ -102,6 +113,14 @@ struct thread
     int exit_status;
     struct list_elem child_elem;
     struct list child_list;
+
+    struct semaphore child_alive_sema; // 이 세마는 부모가 wait하기 위한 세마, 따라서 자식이 create되면 세마 다운, exit할 때 세마 업
+    struct semaphore parent_wait_in_sema; // 이 세마는 부모가 wait에 들어오기 전에 자식이 죽는 것을 방지.
+    struct semaphore child_load_sema; // 이 세마는 자식이 로드되고 부모가 exec에서 리턴되기 위해서
+
+    struct list fd_list;
+    int user_fd;
+    int load_check;  // 1이면 로드 성공 0이면 로드 실패
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
