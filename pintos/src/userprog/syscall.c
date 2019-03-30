@@ -141,12 +141,15 @@ void exit (int status)
 
 pid_t exec (const char *file)
 {
-  return process_execute(file);
+  pid_t temp;
+  temp = process_execute(file);
+  return temp;
 }
 
 int wait (pid_t pid)
 {
-  return process_wait(pid);
+  int child_exit_status = process_wait(pid);
+  return child_exit_status;
 }
 
 bool create (const char *file, unsigned initial_size)
@@ -162,10 +165,8 @@ bool remove (const char *file)
 int open (const char *file)
 {
   //
-  // printf("in open file: %s \n", file);
   struct thread *curr = thread_current();
   struct file_info *new_file_info = palloc_get_page(0);
-  // lock 걸까 말까
   lock_acquire(&file_lock);
   struct file *new_file = filesys_open(file);
   lock_release(&file_lock);
@@ -173,11 +174,15 @@ int open (const char *file)
   if (new_file == NULL) {
     return -1;
   }
-  // printf("after filesys_open \n");
+
+  if (strcmp(thread_current()->name, file) == 0) {
+    file_deny_write(new_file);
+  }
+
   new_file_info->fd = ++curr->user_fd;
   new_file_info->file = new_file;
+
   list_push_back(&curr->fd_list, &new_file_info->elem);
-  // printf("new file fd: %d \n", new_file_info->fd);
   return new_file_info->fd;
 }
 
@@ -189,7 +194,7 @@ int filesize (int fd)
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    return;
+    exit(-1);
   }
   struct file_info *fd_info;
   int find = 0;
@@ -203,7 +208,7 @@ int filesize (int fd)
   }
   if (find == 0) {
     lock_release(&file_lock);
-    return;
+    exit(-1);
   }
   int file_size = file_length(fd_info->file);
   lock_release(&file_lock);
@@ -214,6 +219,7 @@ int read (int fd, void *buffer, unsigned size)
 {
   //
   lock_acquire(&file_lock);
+
   if (fd==0) {
     int i;
     for (i=0; i < size; i++) {
@@ -227,7 +233,7 @@ int read (int fd, void *buffer, unsigned size)
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    return -1;
+    exit(-1);
   }
   struct file_info *fd_info;
   int find = 0;
@@ -241,7 +247,7 @@ int read (int fd, void *buffer, unsigned size)
   }
   if (find == 0) {
     lock_release(&file_lock);
-    return -1;
+    exit(-1);
   }
   int num_read = file_read(fd_info->file, buffer, size);
   lock_release(&file_lock);
@@ -260,7 +266,7 @@ int write (int fd, const void *buffer, unsigned length)
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    return -1;
+    exit(-1);
   }
   struct file_info *fd_info;
   int find = 0;
@@ -274,10 +280,13 @@ int write (int fd, const void *buffer, unsigned length)
   }
   if (find == 0) {
     lock_release(&file_lock);
-    return -1;
+    exit(-1);
   }
+
   int num_write = file_write(fd_info->file, buffer, length);
+
   lock_release(&file_lock);
+
   return num_write;
 }
 
@@ -289,7 +298,7 @@ void seek (int fd, unsigned position)
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    return;
+    exit(-1);
   }
   struct file_info *fd_info;
   int find = 0;
@@ -303,7 +312,7 @@ void seek (int fd, unsigned position)
   }
   if (find == 0) {
     lock_release(&file_lock);
-    return;
+    exit(-1);
   }
   file_seek(fd_info->file, position);
   lock_release(&file_lock);
@@ -317,7 +326,7 @@ unsigned tell (int fd)
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    return;
+    exit(-1);
   }
   struct file_info *fd_info;
   int find = 0;
@@ -331,7 +340,7 @@ unsigned tell (int fd)
   }
   if (find == 0) {
     lock_release(&file_lock);
-    return;
+    exit(-1);
   }
   unsigned position = file_tell(fd_info->file);
   lock_release(&file_lock);
@@ -341,22 +350,28 @@ unsigned tell (int fd)
 void close (int fd)
 {
   lock_acquire(&file_lock);
+  int has_fd = 0;
   struct thread *curr = thread_current();
   struct list_elem *e, *next;
+
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    return;
+    exit(-1);
   }
   struct file_info *fd_info;
   for (e=list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = next) {
     next = list_next(e);
     fd_info = list_entry(e, struct file_info, elem);
     if (fd_info->fd == fd) {
+      has_fd = 1;
       break;
     }
   }
+  if (has_fd == 0) {
+    exit(-1);
+  }
   file_close(fd_info->file);
-  list_remove(&fd_info);
+  list_remove(&fd_info->elem);
   palloc_free_page(fd_info);
   lock_release(&file_lock);
 }

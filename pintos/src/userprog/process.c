@@ -35,20 +35,25 @@ process_execute (const char *file_name)
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  if (fn_copy == NULL) {
+    palloc_free_page (fn_copy); 
     return TID_ERROR;
+  }
   strlcpy(fn_copy, file_name, PGSIZE);
 
   //
   char *file_copy = palloc_get_page(0);
-  if(file_copy == NULL)
-	  return TID_ERROR;
+  if(file_copy == NULL) {
+    palloc_free_page (file_copy); 
+    return TID_ERROR;
+  }
   strlcpy(file_copy, file_name, strlen(file_name)+1);
 
   char *save_ptr;
   char *file_name_only = strtok_r(file_copy, " ", &save_ptr);
   if (file_name_only == NULL) {
     file_name_only = file_name;
+    palloc_free_page (file_copy);
   }
   //
 
@@ -71,8 +76,10 @@ process_execute (const char *file_name)
       tid = TID_ERROR;
     }
   }
-  if (tid == TID_ERROR)
+  if (tid == TID_ERROR) {
     palloc_free_page (fn_copy); 
+    palloc_free_page (file_copy); 
+  }
   return tid;
 }
 
@@ -219,19 +226,31 @@ void push_stack_arguments(char* file_name, char* file_arguments, void **esp){
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  // while (1);
   // check child_tid is valid
   int has_child = 0;
   struct thread *curr = thread_current();
   struct thread *t;
   struct list_elem *e, *next;
+
+  if (list_empty(&curr->child_list)) {
+    return -1;
+  }
   for (e=list_begin(&curr->child_list); e != list_tail(&curr->child_list); e = next)
   {
     next = list_next(e);
     t = list_entry(e, struct thread, child_elem);
     if (t->tid == child_tid) {
-      has_child = 1;
-      break;
+      // prevent wait twice
+      if (t->is_wait_called) {
+        t->exit_status = -1;
+        has_child = 1;
+        return -1;
+      }
+      else {
+        t->is_wait_called = 1;
+        has_child = 1;
+        break;
+      }
     }
   }
   if (!has_child) {
@@ -270,7 +289,9 @@ process_exit (void)
     }
 
   //
-  printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+  if (curr->load_check) {
+    printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+  }
 }
 
 /* Sets up the CPU for running user code in the current
@@ -384,12 +405,16 @@ load (const char *file_name, void (**eip) (void), void **esp)
   // Split file name
   char *save_ptr;
   char *file_name_only = palloc_get_page(0);
-  if(file_name_only == NULL)
+  if(file_name_only == NULL) {
+    palloc_free_page (file_name_only); 
 	  return TID_ERROR;
+  }
   strlcpy(file_name_only, file_name, strlen(file_name)+1);
   file_name_only = strtok_r(file_name_only, " ", &save_ptr);
 
+  // IF there is no argument
   if (file_name_only == NULL) {
+    palloc_free_page (file_name_only); 
     file_name_only = file_name;
   }
  

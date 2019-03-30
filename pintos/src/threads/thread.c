@@ -288,6 +288,7 @@ thread_tid (void)
 void
 thread_exit (void) 
 {
+  //printf("bbbbbbbbbbbbbbbbbb\n");
   ASSERT (!intr_context ());
 
 
@@ -296,13 +297,10 @@ thread_exit (void)
 #endif
 
   //
-  // printf("thread_exit 1 \n");
   sema_up(&thread_current()->child_alive_sema);
-  // printf("thread_exit 2 \n");
   sema_down(&thread_current()->parent_wait_in_sema);
-  // printf("thread_exit 3 \n");
 
-  list_remove(&thread_current()->child_elem);
+  //list_remove(&thread_current()->child_elem);
 
   /* Just set our status to dying and schedule another process.
      We will be destroyed during the call to schedule_tail(). */
@@ -468,6 +466,7 @@ init_thread (struct thread *t, const char *name, int priority)
   sema_init(&t->child_alive_sema, 1);
   sema_init(&t->parent_wait_in_sema, 0);
   sema_init(&t->child_load_sema, 0);
+  t->is_wait_called = 0;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
