@@ -166,7 +166,7 @@ int open (const char *file)
 {
   //
   struct thread *curr = thread_current();
-  struct file_info *new_file_info = palloc_get_page(0);
+  struct file_info *new_file_info = palloc_get_page(0); // we do not handle ended fd_info without meating syscall close? (close do page free !!!!!!!!!!!!)
   lock_acquire(&file_lock);
   struct file *new_file = filesys_open(file);
   lock_release(&file_lock);
@@ -194,7 +194,7 @@ int filesize (int fd)
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    exit(-1);
+    return -1;
   }
   struct file_info *fd_info;
   int find = 0;
@@ -208,7 +208,7 @@ int filesize (int fd)
   }
   if (find == 0) {
     lock_release(&file_lock);
-    exit(-1);
+    return -1;
   }
   int file_size = file_length(fd_info->file);
   lock_release(&file_lock);
@@ -266,7 +266,7 @@ int write (int fd, const void *buffer, unsigned length)
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    exit(-1);
+    return -1;
   }
   struct file_info *fd_info;
   int find = 0;
@@ -280,7 +280,7 @@ int write (int fd, const void *buffer, unsigned length)
   }
   if (find == 0) {
     lock_release(&file_lock);
-    exit(-1);
+    return -1;
   }
 
   int num_write = file_write(fd_info->file, buffer, length);
@@ -298,7 +298,7 @@ void seek (int fd, unsigned position)
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    exit(-1);
+    return -1;
   }
   struct file_info *fd_info;
   int find = 0;
@@ -312,7 +312,7 @@ void seek (int fd, unsigned position)
   }
   if (find == 0) {
     lock_release(&file_lock);
-    exit(-1);
+    return -1;
   }
   file_seek(fd_info->file, position);
   lock_release(&file_lock);
@@ -326,7 +326,7 @@ unsigned tell (int fd)
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    exit(-1);
+    return -1;
   }
   struct file_info *fd_info;
   int find = 0;
@@ -340,7 +340,7 @@ unsigned tell (int fd)
   }
   if (find == 0) {
     lock_release(&file_lock);
-    exit(-1);
+    return -1;
   }
   unsigned position = file_tell(fd_info->file);
   lock_release(&file_lock);

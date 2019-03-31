@@ -43,7 +43,10 @@ process_execute (const char *file_name)
 
   //
   char *file_copy = palloc_get_page(0);
-  if(file_copy == NULL) {
+  if(file_copy == NULL) { // fn_copy also need to free!!!!!!!!!!
+    //!!!!!!!!!!!!!!!!!!!!!!!
+    palloc_free_page (fn_copy);
+    //!!!!!!!!!!!!!!!!!!!!!!!
     palloc_free_page (file_copy); 
     return TID_ERROR;
   }
@@ -71,15 +74,35 @@ process_execute (const char *file_name)
         break;
       }
     }
-    sema_down(&child_thread->child_load_sema);
+    sema_down(&child_thread->child_load_sema); // prevent parent instruct next row before child load
     if (child_thread->load_check == 0) {
-      tid = TID_ERROR;
+      printf("load check tid: %d, load_check: %d, TID_ERROR: %d \n", tid, child_thread->load_check, TID_ERROR);
+      // tid = TID_ERROR;
+      process_wait(tid);
     }
   }
+
   if (tid == TID_ERROR) {
-    palloc_free_page (fn_copy); 
-    palloc_free_page (file_copy); 
+    palloc_free_page (fn_copy);
+    
+    //!!!!!!!!!!!!!!!!!!!!
+    if(strchr(file_name, " ") != NULL){
+      palloc_free_page (file_copy); // twice free file_copy?, if file_name does contain " ", then file_copy has already free (56 line)!!!!!!!!!!!!!!!!
+                                    // strchr(str, c) returns null pointer if there is no 'c'. we have to handle it above code
+    }
   }
+  /* 
+  for(e = list_begin(&curr->child_list); e != list_end(&curr->child_list) ; e = next){
+    next = list_next(e);
+    child_thread = list_entry(e, struct thread, child_elem);
+    if(child_thread->load_check == 0){
+      printf("i have no load thread \n");
+      return process_wait(tid);
+    }
+  }
+  */
+    //!!!!!!!!!!!!!!!!!!!
+
   return tid;
 }
 
@@ -257,10 +280,15 @@ process_wait (tid_t child_tid UNUSED)
     return -1;
   }
 
-  sema_down(&t->child_alive_sema);
+  sema_down(&t->child_alive_sema); //자식이 죽을 때 까지 기다리는 sema
   int child_exit_status = t->exit_status;
-  sema_up(&t->parent_wait_in_sema);
 
+  //
+  list_remove(&t->child_elem);
+  //
+  sema_up(&t->parent_wait_in_sema); //자식이 죽기 전에 wait에 와야하는 parent
+  
+  // printf("4. child exit status is %d and tid %d\n", t->exit_status, child_tid);
   return child_exit_status;
 }
 
@@ -268,8 +296,34 @@ process_wait (tid_t child_tid UNUSED)
 void
 process_exit (void)
 {
+  // printf("exit call\n");
   struct thread *curr = thread_current ();
   uint32_t *pd;
+
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  struct file_info *t;
+  struct list_elem *e, *next;
+  struct thread *child;
+
+  if(!list_empty(&curr->fd_list)){
+    for(e = list_begin(&curr->fd_list);e != list_end(&curr->fd_list); e = next){
+      next = list_next(e);
+      t = list_entry(e, struct file_info, elem);
+      close(t->fd);
+    }
+  }
+
+  if(!list_empty(&curr->child_list)){
+    printf("Come here? \n");
+    for(e = list_begin(&curr->child_list); e != list_end(&curr->child_list); e = next){
+      next = list_next(e);
+      child = list_entry(e, struct thread, child_elem);
+      printf("Come here before wait \n");
+      wait(child->tid);
+    }
+  }
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -407,14 +461,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   char *file_name_only = palloc_get_page(0);
   if(file_name_only == NULL) {
     palloc_free_page (file_name_only); 
-	  return TID_ERROR;
+    return TID_ERROR;
   }
   strlcpy(file_name_only, file_name, strlen(file_name)+1);
-  file_name_only = strtok_r(file_name_only, " ", &save_ptr);
+  file_name_only = strtok_r(file_name_only, " ", &save_ptr); // !!!!!!!!!!!!!!!!!!! save_ptr free?!?!?!?
 
-  // IF there is no argument
   if (file_name_only == NULL) {
-    palloc_free_page (file_name_only); 
+    palloc_free_page (file_name_only); // here!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     file_name_only = file_name;
   }
  
@@ -509,6 +562,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
+  // file_name_only need to free, but if there is no argument, file_name_only has already free!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  if (strchr(file_name, " ") != NULL){
+    palloc_free_page(file_name_only);
+    palloc_free_page(save_ptr);
+  }
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   file_close (file);
   return success;
 }
