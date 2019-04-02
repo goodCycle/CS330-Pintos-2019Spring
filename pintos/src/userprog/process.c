@@ -21,7 +21,8 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
-/* Starts a new thread running a user program loaded from
+
+/* Starts a new thread running a user program loadedm from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
@@ -31,17 +32,55 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
+  char file_name_only[256]; // 4KB
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  fn_copy = palloc_get_page(0);
+  // If there is no page to be allocated.
+  if (fn_copy == NULL) {
+    palloc_free_page(fn_copy); 
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  }
+  strlcpy(fn_copy, file_name, PGSIZE);
+
+  // Extract file name only from input file_name
+  int i;
+  strlcpy(file_name_only, file_name, strlen(file_name)+1);
+  for(i=0; file_name_only[i] != '\0' && file_name_only[i] != ' '; i++);
+  file_name_only[i] = '\0';
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+  tid = thread_create (file_name_only, PRI_DEFAULT, start_process, fn_copy);
+  // If thread_create get failed.
+  if(tid == TID_ERROR){
+    palloc_free_page(fn_copy);
+    return tid;
+  }
+
+  struct thread *curr = thread_current();
+  struct list_elem *e, *next;
+  struct thread *child_thread;
+  
+  if (!list_empty(&curr->child_list)) {
+    for (e = list_begin(&curr->child_list); e != list_end(&curr->child_list); e = next) {
+      next = list_next(e);
+      child_thread = list_entry(e, struct thread, child_elem);
+      if (child_thread->tid == tid) {
+        break;
+      }
+    }
+    
+    sema_down(&child_thread->child_load_sema); // prevent parent instruct next row before child load
+    
+    if (child_thread->load_check == 0) {
+      tid = TID_ERROR;
+      palloc_free_page(fn_copy);
+      return process_wait(tid);
+    }
+  }
+  // Need to free page before return.
+  palloc_free_page(fn_copy);
   return tid;
 }
 
@@ -50,7 +89,14 @@ process_execute (const char *file_name)
 static void
 start_process (void *f_name)
 {
-  char *file_name = f_name;
+  //
+  char *file_name = palloc_get_page(0);
+  if(file_name == NULL){
+    palloc_free_page(file_name);
+    thread_exit();
+  }
+  strlcpy(file_name, f_name, PGSIZE);
+
   struct intr_frame if_;
   bool success;
 
@@ -61,8 +107,18 @@ start_process (void *f_name)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
+  // 
+  if (success) {
+    thread_current()->load_check = 1;
+  } else {
+    thread_current()->load_check = 0;
+  }
+  sema_up(&thread_current()->child_load_sema); // 자식이 로드되고 부모가 exec 되야함.
+  //
+
   /* If load failed, quit. */
-  palloc_free_page (file_name);
+  palloc_free_page (file_name);  //
+
   if (!success) 
     thread_exit ();
 
@@ -74,6 +130,90 @@ start_process (void *f_name)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+}
+
+void push_stack_arguments(char* file_name, char* file_arguments, void **esp){
+
+  // Calculate argc
+  int argc = 1;
+  if (strlen(file_arguments) != 0) {
+    char *argument_ptr = file_arguments;
+    while((argument_ptr = strchr(argument_ptr, ' ')) != NULL) {
+      argc++;
+      argument_ptr++;
+      while (argument_ptr[0] == ' ') {
+        argument_ptr += 1;
+      }
+    }
+    argc += 1;
+  }
+  // Store the address of arguments that it's value is stored.
+  int i;
+  int total_length = 0;
+  int cnt = 1;
+  uint32_t *arg_address = malloc(sizeof(uint32_t)*argc);
+  memset(arg_address, 0, sizeof(arg_address));
+  int number_of_arguments = argc - 1;
+  if (number_of_arguments > 1) {
+    for (i = argc-1; i >= 2; i--) {
+      char* last_word = strrchr(file_arguments, ' ');
+      cnt = 1;
+      while(*last_word == ' '){
+        *last_word = '\0';
+        cnt += 1;
+        last_word -= 1;
+      }
+      last_word = last_word + cnt;
+      *esp -= strlen(last_word)+1;
+      arg_address[i] = *esp;
+      strlcpy(*esp, last_word, strlen(last_word)+1);
+      total_length += strlen(last_word)+1;
+    }
+  }
+  
+  // If the number of argument is one
+  if (number_of_arguments > 0) {
+    *esp -= strlen(file_arguments)+1;
+    arg_address[1] = *esp;
+    strlcpy(*esp, file_arguments, strlen(file_arguments)+1);
+    total_length += strlen(file_arguments)+1;
+  }
+
+  // Store address and value of file name in the stack.
+  *esp -= strlen(file_name)+1;
+  arg_address[0] = *esp;
+  strlcpy(*esp, file_name, strlen(file_name)+1);
+  total_length += strlen(file_name)+1;
+
+  // Do word align.
+  int word_align = (total_length % 4 == 0) ? 0 : 4 - total_length % 4;
+  *esp -= word_align;
+  memset(*esp, 0, word_align);
+ 
+  // Push 4 byte as 0.
+  *esp -= 4;
+  memset(*esp, 0, 4);
+  
+  // Push argment vector.
+  for (i=argc-1;i>=0;i--){
+    *esp -= 4;
+    memcpy(*esp, &arg_address[i], 4);
+  }
+
+  // Push the address of the argv
+  int argv_zero_address = *esp;
+  *esp -= 4;
+  memcpy(*esp, &argv_zero_address, 4);
+
+  // Push argc
+  *esp -= 4;
+  memcpy(*esp, &argc, 4);
+
+  // Push the fake return address.
+  *esp -= 4;
+  memset(*esp, 0, 4);
+
+  free(arg_address);
 }
 
 /* This is 2016 spring cs330 skeleton code */
@@ -90,15 +230,74 @@ start_process (void *f_name)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+  // check child_tid is valid
+  int has_child = 0;
+  struct thread *curr = thread_current();
+  struct thread *t;
+  struct list_elem *e, *next;
+
+  if (list_empty(&curr->child_list)) {
+    return -1;
+  }
+  for (e=list_begin(&curr->child_list); e != list_tail(&curr->child_list); e = next)
+  {
+    next = list_next(e);
+    t = list_entry(e, struct thread, child_elem);
+    if (t->tid == child_tid) {
+      // prevent wait twice
+      if (t->is_wait_called) {
+        t->exit_status = -1;
+        has_child = 1;
+        return -1;
+      }
+      else {
+        t->is_wait_called = 1;
+        has_child = 1;
+        break;
+      }
+    }
+  }
+  if (!has_child) {
+    return -1;
+  }
+
+  sema_down(&t->child_alive_sema); //자식이 죽을 때 까지 기다리는 sema
+  int child_exit_status = t->exit_status;
+
+  list_remove(&t->child_elem);
+  sema_up(&t->parent_wait_in_sema); //자식이 죽기 전에 wait에 와야하는 parent
+  
+  return child_exit_status;
 }
 
 /* Free the current process's resources. */
 void
 process_exit (void)
 {
+  // printf("exit call\n");
   struct thread *curr = thread_current ();
   uint32_t *pd;
+
+  struct file_info *t;
+  struct list_elem *e, *next;
+  struct thread *child;
+
+  if(!list_empty(&curr->fd_list)){
+    for(e = list_begin(&curr->fd_list);e != list_end(&curr->fd_list); e = next){
+      next = list_next(e);
+      t = list_entry(e, struct file_info, elem);
+      close(t->fd);
+    }
+  }
+
+  if(!list_empty(&curr->child_list)){
+    for(e = list_begin(&curr->child_list); e != list_end(&curr->child_list); e = next){
+      next = list_next(e);
+      child = list_entry(e, struct thread, child_elem);
+      wait(child->tid);
+    }
+  }
+  
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -116,6 +315,11 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  //
+  if (curr->load_check) {
+    printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+  }
 }
 
 /* Sets up the CPU for running user code in the current
@@ -197,7 +401,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (char* file_name, char* file_arguments, void **esp);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -217,14 +421,32 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
+  // Initialize exit
+  t->exit_status = 0;
+
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
+  
+  // Split file name
+  char *save_ptr;
+  char *file_name_only = palloc_get_page(0);
+  if(file_name_only == NULL) {
+    palloc_free_page (file_name_only); 
+    goto done;
+  }
+  strlcpy(file_name_only, file_name, strlen(file_name)+1);
+  file_name_only = strtok_r(file_name_only, " ", &save_ptr);
 
+  // Copy file_name to file_name_only for palloc_free_page at the last.
+  if (file_name_only == NULL) {
+    strlcpy(file_name_only, file_name, strlen(file_name)+1);
+  }
+  
   /* Open executable file. */
-  file = filesys_open (file_name);
+  file = filesys_open (file_name_only);
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -304,7 +526,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (file_name_only, save_ptr, esp)) // change arguments of setup_stack
     goto done;
 
   /* Start address. */
@@ -313,8 +535,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   success = true;
 
  done:
-  /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  palloc_free_page(file_name_only);
   return success;
 }
 
@@ -429,7 +650,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (char* file_name, char* file_arguments, void **esp) 
 {
   uint8_t *kpage;
   bool success = false;
@@ -443,6 +664,10 @@ setup_stack (void **esp)
       else
         palloc_free_page (kpage);
     }
+
+  // Push arguments in the stack
+  push_stack_arguments(file_name, file_arguments, esp);
+
   return success;
 }
 

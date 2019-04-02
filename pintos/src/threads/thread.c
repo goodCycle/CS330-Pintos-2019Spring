@@ -177,10 +177,12 @@ thread_create (const char *name, int priority,
 
   ASSERT (function != NULL);
 
+
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
-  if (t == NULL)
+  if (t == NULL) {
     return TID_ERROR;
+  }
 
   /* Initialize thread. */
   init_thread (t, name, priority);
@@ -199,6 +201,11 @@ thread_create (const char *name, int priority,
   /* Stack frame for switch_threads(). */
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
+
+  //
+  struct thread *curr = thread_current();
+  list_push_back(&curr->child_list, &t->child_elem);
+  sema_down(&t->child_alive_sema);
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -282,11 +289,19 @@ thread_tid (void)
 void
 thread_exit (void) 
 {
+  //printf("bbbbbbbbbbbbbbbbbb\n");
   ASSERT (!intr_context ());
+
 
 #ifdef USERPROG
   process_exit ();
 #endif
+
+  //
+  sema_up(&thread_current()->child_alive_sema);
+  sema_down(&thread_current()->parent_wait_in_sema);
+
+  //list_remove(&thread_current()->child_elem);
 
   /* Just set our status to dying and schedule another process.
      We will be destroyed during the call to schedule_tail(). */
@@ -444,6 +459,15 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  //
+  t->user_fd = 2;
+  list_init(&t->child_list);
+  list_init(&t->fd_list);
+  sema_init(&t->child_alive_sema, 1);
+  sema_init(&t->parent_wait_in_sema, 0);
+  sema_init(&t->child_load_sema, 0);
+  t->is_wait_called = 0;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
