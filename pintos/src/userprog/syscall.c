@@ -167,6 +167,12 @@ int open (const char *file)
   //
   struct thread *curr = thread_current();
   struct file_info *new_file_info = palloc_get_page(0); // we do not handle ended fd_info without meating syscall close? (close do page free !!!!!!!!!!!!)
+
+  if(new_file_info == NULL){
+    palloc_free_page(new_file_info);
+    return -1;
+  }
+
   lock_acquire(&file_lock);
   struct file *new_file = filesys_open(file);
   lock_release(&file_lock);
@@ -233,7 +239,7 @@ int read (int fd, void *buffer, unsigned size)
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
     lock_release(&file_lock);
-    exit(-1);
+    return -1;
   }
   struct file_info *fd_info;
   int find = 0;
@@ -247,7 +253,7 @@ int read (int fd, void *buffer, unsigned size)
   }
   if (find == 0) {
     lock_release(&file_lock);
-    exit(-1);
+    return -1;
   }
   int num_read = file_read(fd_info->file, buffer, size);
   lock_release(&file_lock);

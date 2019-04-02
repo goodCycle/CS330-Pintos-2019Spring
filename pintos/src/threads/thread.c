@@ -180,8 +180,9 @@ thread_create (const char *name, int priority,
 
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
-  if (t == NULL)
+  if (t == NULL) {
     return TID_ERROR;
+  }
 
   /* Initialize thread. */
   init_thread (t, name, priority);
