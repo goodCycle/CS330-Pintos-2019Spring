@@ -11,8 +11,13 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "hash.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
+#include "vm/page.h"
 #endif
 
 
@@ -28,6 +33,9 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+
+//
+struct hash *frame_table;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -72,6 +80,7 @@ static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -95,6 +104,10 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
+
+  //
+  swap_init ();
+  hash_init (frame_table, frame_hash_func, frame_hash_less_func, NULL);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();

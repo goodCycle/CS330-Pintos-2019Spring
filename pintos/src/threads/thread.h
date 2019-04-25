@@ -7,6 +7,7 @@
 
 //
 #include "threads/synch.h"
+#include "hash.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -125,6 +126,9 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+
+    // project3
+    struct hash spt; // supplement page table
   };
 
 /* If false (default), use round-robin scheduler.

@@ -1,8 +1,11 @@
 #include "vm/swap.h"
+#include "vm/page.h"
 #include "devices/disk.h"
 #include "threads/synch.h"
 #include <bitmap.h>
-
+#include "vm/frame.h"
+#include "threads/thread.h"
+#include "userprog/pagedir.h"
 
 /* The swap device */
 static struct disk *swap_device;
@@ -13,13 +16,25 @@ static struct bitmap *swap_table;
 /* Protects swap_table */
 static struct lock swap_lock;
 
+//
+extern struct hash *frame_table;
+
 /* 
  * Initialize swap_device, swap_table, and swap_lock.
  */
 void 
 swap_init (void)
 {
+    swap_device = disk_get(1,1);
+    if(swap_device == NULL) 
+        return;
+    disk_sector_t swap_size = disk_size(swap_device);
 
+    swap_table = bitmap_create(swap_size/8);
+    if(swap_table == NULL) 
+        return;
+
+    lock_init(&swap_lock);
 }
 
 /*
@@ -37,8 +52,7 @@ swap_init (void)
 bool 
 swap_in (void *addr)
 {
-
-
+    
 }
 
 /* 
@@ -58,8 +72,30 @@ swap_in (void *addr)
 bool
 swap_out (void)
 {
+    lock_acquire(&swap_lock);
+    
+    struct hash_iterator i;
 
+    hash_first (&i, frame_table);
+    struct hash_elem *evicted_elem = hash_delete(frame_table, hash_cur (&i));
+    struct frame_table_entry *evicted_fte = hash_entry(evicted_elem, struct frame_table_entry, hash_elem);
+    
+    struct sup_page_table_entry *evicted_spte = evicted_fte->spte;
+    pagedir_clear_page(evicted_fte->owner->pagedir, evicted_spte->user_vaddr);
+    hash_delete(frame_table, evicted_elem);
+    
+    size_t bit_index = bitmap_scan(swap_table, 0, 1, 0);
+    bitmap_flip(swap_table, bit_index);
 
+	disk_write(swap_device, bit_index, evicted_fte->frame);
+
+    evicted_spte->is_in_frame = 0;
+    evicted_spte->is_in_swap = 1;
+    evicted_spte->frame = 0;
+    evicted_spte->bit_index = bit_index;
+
+    lock_release(&swap_lock);
+    return true;
 }
 
 /* 

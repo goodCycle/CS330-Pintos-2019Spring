@@ -5,6 +5,8 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/palloc.h"
+#include "userprog/process.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -152,6 +154,35 @@ page_fault (struct intr_frame *f)
   if (!is_valid ((int32_t) fault_addr)){
     exit (-1);
   }
+
+  if (not_present) { // 가정 : 지금 매핑이 안되어 있다. 
+    uint8_t *kpage = palloc_get_page (PAL_USER);
+    uint32_t *upage = fault_addr;
+    bool writable = true;
+    if (install_page(upage, kpage, writable)) {
+      // spte 에 추가 
+      // frame table에 추가
+    } else {
+      // 1) frame이 꽉 찬 상태에서 upage는 매핑된적 없음
+      /* if (!spte_find(upage)) {
+         // frame_eviction : swap_in
+          // spte를 추가 + frame table을 수정
+      } 
+      2) frame이 꽉 찼는데 매핑되어야 할 애가 swap에 있음
+      else if (spte_find(upage)->is_in_swap) {
+        // frame_eviction : swap_in
+        // frame_addition(spte를 수정 + frame table을 수정) : swap_out
+      } 
+      3) frame이 꽉 찼는데 매핑되어야 할 애가 file에 있음
+      else if (!spte_find(upage)->is_in_swap) {
+        // frame eviction의 return값이 넣을 frame을 리턴 (frame eviction 은 file_in + spte에서 매핑 끊기)
+        // spte에서 추가
+        // frame table을 새로운 값으로 수정
+      } else{
+        exit(-1);
+      } */
+    }
+  }
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
@@ -169,8 +200,9 @@ bool is_valid (int32_t user_ptr)
     return 0;
 	}
   struct thread *curr = thread_current();
-  if (pagedir_get_page(curr->pagedir, user_ptr) == NULL) {
+  /* if (pagedir_get_page(curr->pagedir, user_ptr) == NULL) {
+    // 이 놈은 이제 unmap된 virtual address니까 우리가 이거 physical address랑 연결시켜 줘야 함.
     return 0;
-  }
+  } */
   return 1;
 }
