@@ -12,5 +12,6 @@
 void exception_init (void);
 void exception_print_stats (void);
 bool is_valid (int32_t user_ptr);
+bool is_valid_stack (int32_t user_ptr);
 
 #endif /* userprog/exception.h */

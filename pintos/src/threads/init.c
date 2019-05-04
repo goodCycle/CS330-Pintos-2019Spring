@@ -117,6 +117,8 @@ main (void)
   disk_init ();
   filesys_init (format_filesys);
 #endif
+  swap_init ();
+  frame_init ();
 
   printf ("Boot complete.\n");
   

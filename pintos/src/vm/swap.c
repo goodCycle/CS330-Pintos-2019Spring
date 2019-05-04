@@ -17,7 +17,7 @@ static struct bitmap *swap_table;
 static struct lock swap_lock;
 
 //
-extern struct hash *frame_table;
+// extern struct hash frame_table;
 
 /* 
  * Initialize swap_device, swap_table, and swap_lock.
@@ -50,9 +50,43 @@ swap_init (void)
  * of the disk into the frame. 
  */ 
 bool 
-swap_in (void *addr)
+swap_in (void *addr, void *kpage)
 {
-    
+    lock_acquire(&swap_lock);
+
+    struct thread *curr = thread_current();
+    struct hash_iterator i;
+    struct sup_page_table_entry *spte; 
+    hash_first (&i, &curr->spt);
+
+    if(hash_next (&i) == NULL) //no spte
+        return false;
+
+    while (hash_next (&i)) //find spte
+    {
+        spte = hash_entry (hash_cur (&i), struct sup_page_table_entry, hash_elem);
+        if(spte->user_vaddr == addr)
+            break;
+    }
+
+
+    if(spte->is_in_frame)
+        return false;
+
+    if (spte->is_mapped) {
+        size_t bit_index = spte->bit_index;
+        
+        // swap에도 없는 경우
+        read_from_disk(kpage, bit_index); //kpage의 정보를 bit_index에 read
+        bitmap_flip(swap_table, bit_index); //flip
+
+        spte->frame = kpage;
+        spte->is_in_frame = 1;
+    }
+    allocate_frame(kpage, spte);
+
+    lock_release(&swap_lock);
+    return true;
 }
 
 /* 
@@ -74,26 +108,25 @@ swap_out (void)
 {
     lock_acquire(&swap_lock);
     
-    struct hash_iterator i;
+    // struct hash_iterator i;
 
-    hash_first (&i, frame_table);
-    struct hash_elem *evicted_elem = hash_delete(frame_table, hash_cur (&i));
+    // hash_first (&i, &frame_table);
+    struct hash_elem *evicted_elem = delete_frame_entry(); //hash_delete(&frame_table, hash_cur (&i));
     struct frame_table_entry *evicted_fte = hash_entry(evicted_elem, struct frame_table_entry, hash_elem);
-    
     struct sup_page_table_entry *evicted_spte = evicted_fte->spte;
-    pagedir_clear_page(evicted_fte->owner->pagedir, evicted_spte->user_vaddr);
-    hash_delete(frame_table, evicted_elem);
     
     size_t bit_index = bitmap_scan(swap_table, 0, 1, 0);
     bitmap_flip(swap_table, bit_index);
-
-	disk_write(swap_device, bit_index, evicted_fte->frame);
-
+	write_to_disk(evicted_fte->frame, bit_index);
+    
+    pagedir_clear_page(evicted_fte->owner->pagedir, evicted_spte->user_vaddr);
+    
     evicted_spte->is_in_frame = 0;
     evicted_spte->is_in_swap = 1;
-    evicted_spte->frame = 0;
     evicted_spte->bit_index = bit_index;
 
+    palloc_free_page(evicted_fte->frame);
+    free(evicted_fte); //
     lock_release(&swap_lock);
     return true;
 }
@@ -104,14 +137,11 @@ swap_out (void)
  */
 void read_from_disk (uint8_t *frame, int index)
 {
-
-
+    disk_read(swap_device, (disk_sector_t)index, frame);
 }
 
 /* Write data to swap device from frame */
 void write_to_disk (uint8_t *frame, int index)
 {
-
-
+    disk_write(swap_device, (disk_sector_t)index, frame);
 }
-

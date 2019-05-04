@@ -129,6 +129,7 @@ struct thread
 
     // project3
     struct hash spt; // supplement page table
+    void *user_esp; // user stack pointer
   };
 
 /* If false (default), use round-robin scheduler.

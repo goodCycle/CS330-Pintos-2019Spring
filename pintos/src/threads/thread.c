@@ -34,9 +34,6 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
-//
-struct hash *frame_table;
-
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -106,8 +103,9 @@ thread_init (void)
   list_init (&ready_list);
 
   //
-  swap_init ();
-  hash_init (frame_table, frame_hash_func, frame_hash_less_func, NULL);
+  /* swap_init ();
+  frame_init ();
+  */
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();

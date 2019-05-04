@@ -120,13 +120,21 @@ syscall_handler (struct intr_frame *f UNUSED)
 }
 
 void* valid_pointer(void *ptr) {
+  // syscall에서 code segment에 write..?
+
   if(ptr == NULL || !is_user_vaddr(ptr) || ptr < (void *) 0x08048000)
 	{
+    // printf("null exit\n");
     exit(-1);
 	}
   struct thread *curr = thread_current();
   if (pagedir_get_page(curr->pagedir, ptr) == NULL)
   {
+    // printf("unmapped exit\n");
+    exit(-1);
+  }  
+  if(!(ptr > 0x80480a0UL)) {
+    // printf("stack exit\n");
     exit(-1);
   }
   return ptr;

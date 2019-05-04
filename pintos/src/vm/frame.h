@@ -16,7 +16,7 @@ struct frame_table_entry
 };
 
 void frame_init (void);
-bool allocate_frame (void *addr);
+bool allocate_frame (void *frame, struct sup_page_table_entry *spte);
 
 
 uint32_t frame_hash_func(struct hash_elem *e);
