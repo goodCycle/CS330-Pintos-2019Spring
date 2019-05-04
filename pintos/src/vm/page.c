@@ -17,7 +17,7 @@ page_init ()
  * Make new supplementary page table entry for addr 
  */
 struct sup_page_table_entry *
-allocate_page (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool from_load)
+allocate_page (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load)
 {
     struct sup_page_table_entry *spte = malloc(sizeof(struct sup_page_table_entry));
     if (spte == NULL)
@@ -33,6 +33,8 @@ allocate_page (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struc
     spte->page_read_bytes = page_read_bytes;
     spte->page_zero_bytes = page_zero_bytes;
     spte->from_load = from_load;
+    spte->writable = writable;
+    spte->ofs = ofs;
     /*
     spte->dirty = 0
 	spte->accessed = 0
@@ -50,14 +52,14 @@ spte_find(void *addr)
     struct sup_page_table_entry *spte; 
     hash_first (&i, &curr->spt);
 
-    if(hash_next (&i) == NULL) //no spte
-        return false;
-
     while (hash_next (&i)) //find spte
     {
         spte = hash_entry (hash_cur (&i), struct sup_page_table_entry, hash_elem);
-        if(spte->user_vaddr == addr)
+        if(spte->user_vaddr == addr){
+            // printf("spte->user_vaddr %08x, addr is %08x\n", spte->user_vaddr, addr);
             break;
+        }
+        spte = NULL;
     }
 
     if (spte == NULL) 

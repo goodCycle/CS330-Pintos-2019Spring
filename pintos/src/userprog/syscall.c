@@ -1,17 +1,22 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <stdbool.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-
+#include "userprog/exception.h"
 #include "threads/init.h"
+#include "vm/page.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
+#include "threads/palloc.h"
 
 static void syscall_handler (struct intr_frame *);
 int sys_write(int fd, const void *buffer, unsigned size);
 void* valid_pointer(void *ptr);
 
-struct lock file_lock;
+// struct lock file_lock;
 
 void
 syscall_init (void) 
@@ -128,13 +133,55 @@ void* valid_pointer(void *ptr) {
     exit(-1);
 	}
   struct thread *curr = thread_current();
+  ////////////////////////////////////////////////////////////////
+  //page_fault 핸들링, 이상하게 read의 buffer_addr가 valid한지는 page fault가 안나옴 여기서 처리해야 할듯?!
+  void *fault_addr = pg_round_down(ptr);
+  struct sup_page_table_entry *find_spte = spte_find(fault_addr);
+  if(find_spte && pagedir_get_page(curr->pagedir, ptr) == NULL)
+  {
+    void *upage = fault_addr;
+    uint8_t *kpage;
+
+    if(find_spte->page_read_bytes != 0)
+      kpage = palloc_get_page (PAL_USER);
+    else
+      kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+
+    if (kpage != NULL) {
+      if (find_spte->from_load && find_spte->page_read_bytes > 0) {
+        lock_acquire(&file_lock);
+        if (file_read_at (find_spte->file, kpage, find_spte->page_read_bytes, find_spte->ofs) != (int) find_spte->page_read_bytes)
+        {
+          palloc_free_page (kpage);
+          lock_release(&file_lock);
+          exit(-1);
+        }
+        memset (kpage + find_spte->page_read_bytes, 0, find_spte->page_zero_bytes);
+        lock_release(&file_lock);
+      }
+
+      // frame table에 추가
+      struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
+      if (new_fte == NULL)
+      {
+        palloc_free_page(kpage);
+        exit(-1);
+      }
+
+      if (!install_page(upage, kpage, find_spte->writable)) {
+        palloc_free_page(kpage);
+        exit(-1);
+      }
+      find_spte->frame = kpage;
+    }
+  }
+  // 추가로 여기에 stack growth 도 해줘야하는가? 지금 pt-grow-stk-sc가 여기인거같은데..? stack syscall = stk-sc??
+  ////////////////////////////////////////////////////////////////
   if (pagedir_get_page(curr->pagedir, ptr) == NULL)
   {
-    // printf("unmapped exit\n");
     exit(-1);
-  }  
+  }
   if(!(ptr > 0x80480a0UL)) {
-    // printf("stack exit\n");
     exit(-1);
   }
   return ptr;

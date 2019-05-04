@@ -622,7 +622,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      // /* Get a page of memory. */
+      /* Get a page of memory. */
       // uint8_t *kpage = palloc_get_page (PAL_USER);
       // if (kpage == NULL)
       //   return false;
@@ -641,10 +641,14 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       //     palloc_free_page (kpage);
       //     return false; 
       // }
+
+      // printf("upage is %08x, kpage is %08x\n, writable is %08x\n", upage, kpage, writable);
       
       // 여기서 spte만 만들어서 추가만 해줘야 됨......
-      allocate_page(upage, 0, 1, 0, file, ofs, page_read_bytes, page_zero_bytes, 1); // Load하면 frame에 있다. 얘는 file 공간에서 온 애니까..
+      // (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load);
+      allocate_page(upage, 0, 1, 0, file, ofs, page_read_bytes, page_zero_bytes, writable, 1); // Load하면 frame에 있다. 얘는 file 공간에서 온 애니까..
       //
+      // printf("upage is %08x\n", upage);
 
       /* Advance. */
       read_bytes -= page_read_bytes;

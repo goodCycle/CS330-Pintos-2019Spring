@@ -6,6 +6,8 @@
 
 typedef int pid_t;
 
+struct lock file_lock;
+
 void syscall_init (void);
 
 //

@@ -28,10 +28,11 @@ struct sup_page_table_entry
 	size_t page_read_bytes;
 	size_t page_zero_bytes;
 	bool from_load;
+	bool writable;
 };
 
 void page_init (void);
-struct sup_page_table_entry *allocate_page (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool from_load);
+struct sup_page_table_entry *allocate_page (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load);
 uint32_t spt_hash_func(struct hash_elem *e);
 bool spt_hash_less_func (const struct hash_elem *elem_a, const struct hash_elem *elem_b, void *aux);
 

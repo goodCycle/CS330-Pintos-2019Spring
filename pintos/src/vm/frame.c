@@ -19,19 +19,19 @@ frame_init (void)
 /* 
  * Make a new frame table entry for addr.
  */
-bool
+struct frame_table_entry *
 allocate_frame (void *frame, struct sup_page_table_entry *spte)
 {
     struct frame_table_entry *new_fte = malloc(sizeof(struct frame_table_entry));
     if (new_fte == NULL)
-        return false;
+        return NULL;
     new_fte->frame = frame;
     new_fte->owner = thread_current();
     new_fte->spte = spte;
     hash_insert(&frame_table, &new_fte->hash_elem);
 
     spte->is_mapped = 1; //
-    return true;
+    return new_fte;
 }
 
 uint8_t
