@@ -301,6 +301,19 @@ process_exit (void)
     }
   }
   
+  struct hash_iterator i;
+  struct sup_page_table_entry *spte; 
+  hash_first (&i, &curr->spt);
+  struct hash_elem *hash_elem;
+
+  while (hash_elem) // Remove all the frame related to spte
+  {
+    hash_elem = hash_next(&i);
+    spte = hash_entry (hash_cur (&i), struct sup_page_table_entry, hash_elem);
+    if (spte->is_in_frame) {
+      remove_frame(spte->frame);
+    }
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */

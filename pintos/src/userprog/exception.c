@@ -257,9 +257,7 @@ page_fault (struct intr_frame *f)
     /* Have kpage to allocate frame */
     if (kpage != NULL) {
       /* Lazy loading */
-      if (find_spte->from_load) {
-        load_file_lazily(kpage, find_spte);
-      }
+      load_file_lazily(kpage, find_spte);
 
       /* Add kpage to frame */
       struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);

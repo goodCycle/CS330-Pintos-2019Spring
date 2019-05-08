@@ -53,6 +53,41 @@ delete_frame_entry()
     return evicted_elem;
 }
 
+struct frame_table_entry *
+fte_find(void *kpage)
+{
+    struct thread *curr = thread_current();
+    struct hash_iterator i;
+    struct frame_table_entry *fte; 
+    hash_first (&i, &frame_table);
+
+    while (hash_next (&i))
+    {
+        fte = hash_entry (hash_cur (&i), struct frame_table_entry, hash_elem);
+        if(fte->frame == kpage){
+            break;
+        }
+        fte = NULL;
+    }
+
+    if (fte == NULL) 
+        return NULL;
+    return fte;
+}
+
+void
+remove_frame(void *kpage)
+{
+    struct frame_table_entry *fte = fte_find(kpage);
+   
+    hash_delete(&frame_table, &fte->hash_elem);
+    palloc_free_page(fte->frame);
+
+    hash_delete(&fte->owner->spt, &fte->spte->hash_elem);
+    free(fte->spte);
+    free(fte);
+}
+
 uint32_t frame_hash_func(struct hash_elem *e)
 {
     struct frame_table_entry *fte = hash_entry(e, struct frame_table_entry, hash_elem);

@@ -479,6 +479,7 @@ init_thread (struct thread *t, const char *name, int priority)
   sema_init(&t->parent_wait_in_sema, 0);
   sema_init(&t->child_load_sema, 0);
   t->is_wait_called = 0;
+  t->mapid = 0;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

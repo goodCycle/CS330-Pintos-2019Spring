@@ -9,6 +9,8 @@
 #include "threads/synch.h"
 #include "hash.h"
 
+typedef int mapid_t;
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -92,6 +94,13 @@ struct file_info {
   struct list_elem elem;
 };
 
+struct mfile {
+    mapid_t mapid;
+    void *upage;
+    struct fd_info *fd_info;
+    struct list_elem elem;
+};
+
 struct thread
   {
     /* Owned by thread.c. */
@@ -130,6 +139,9 @@ struct thread
     // project3
     struct hash spt; // supplement page table
     void *user_esp; // user stack pointer
+
+    struct list mfile_list;
+    mapid_t mapid;
   };
 
 /* If false (default), use round-robin scheduler.
