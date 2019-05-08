@@ -14,7 +14,7 @@ static struct disk *swap_device;
 static struct bitmap *swap_table;
 
 /* Protects swap_table */
-static struct lock swap_lock;
+struct lock swap_lock;
 
 //
 // extern struct hash frame_table;
@@ -51,16 +51,11 @@ swap_init (void)
  */ 
 bool 
 swap_in (void *addr, void *kpage)
-{
-    lock_acquire(&swap_lock);
-
+{   
     struct thread *curr = thread_current();
     struct hash_iterator i;
     struct sup_page_table_entry *spte; 
     hash_first (&i, &curr->spt);
-
-    if(hash_next (&i) == NULL) //no spte
-        return false;
 
     while (hash_next (&i)) //find spte
     {
@@ -69,10 +64,16 @@ swap_in (void *addr, void *kpage)
             break;
     }
 
-
-    if(spte->is_in_frame)
+    if(spte == NULL){
+        lock_release(&swap_lock);
         return false;
-
+    }
+        
+    if(spte->is_in_frame){
+        lock_release(&swap_lock);
+        return false;
+    }
+        
     if (spte->is_mapped) {
         size_t bit_index = spte->bit_index;
         
@@ -83,8 +84,18 @@ swap_in (void *addr, void *kpage)
         spte->frame = kpage;
         spte->is_in_frame = 1;
     }
-    allocate_frame(kpage, spte);
-
+    struct frame_table_entry *fte = allocate_frame(kpage, spte);
+    if(!fte){
+        palloc_free_page(kpage);
+        free(fte);
+        return false;
+    }
+    
+    if(!install_page(addr, kpage, spte->writable)){
+        palloc_free_page(kpage);
+        lock_release(&swap_lock);
+        return false;
+    }
     lock_release(&swap_lock);
     return true;
 }
@@ -108,9 +119,6 @@ swap_out (void)
 {
     lock_acquire(&swap_lock);
     
-    // struct hash_iterator i;
-
-    // hash_first (&i, &frame_table);
     struct hash_elem *evicted_elem = delete_frame_entry(); //hash_delete(&frame_table, hash_cur (&i));
     struct frame_table_entry *evicted_fte = hash_entry(evicted_elem, struct frame_table_entry, hash_elem);
     struct sup_page_table_entry *evicted_spte = evicted_fte->spte;
@@ -127,7 +135,6 @@ swap_out (void)
 
     palloc_free_page(evicted_fte->frame);
     free(evicted_fte); //
-    lock_release(&swap_lock);
     return true;
 }
 
@@ -137,11 +144,15 @@ swap_out (void)
  */
 void read_from_disk (uint8_t *frame, int index)
 {
-    disk_read(swap_device, (disk_sector_t)index, frame);
+    int i=0;
+    for(i=0;i<8;i++)
+        disk_read(swap_device, (disk_sector_t)(index*8+i), frame+i*512);
 }
 
 /* Write data to swap device from frame */
 void write_to_disk (uint8_t *frame, int index)
 {
-    disk_write(swap_device, (disk_sector_t)index, frame);
+    int i=0;
+    for(i=0;i<8;i++)
+        disk_write(swap_device, (disk_sector_t)(index*8+i), frame+i*512);
 }

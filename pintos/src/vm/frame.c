@@ -38,7 +38,7 @@ uint8_t
 evict_frame(void *addr)
 {
     swap_out();
-    uint8_t kpage = palloc_get_page(PAL_USER); //need synch? while?!?!?!?!?
+    void* kpage = palloc_get_page(PAL_USER | PAL_ZERO); //need synch? while?!?!?!?!?
     swap_in(addr, kpage);
     return kpage;
 }
@@ -48,6 +48,7 @@ delete_frame_entry()
 {
     struct hash_iterator i;
     hash_first (&i, &frame_table);
+    hash_next(&i);
     struct hash_elem *evicted_elem = hash_delete(&frame_table, hash_cur (&i));
     return evicted_elem;
 }

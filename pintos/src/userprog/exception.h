@@ -8,10 +8,15 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include "vm/page.h"
 
 void exception_init (void);
 void exception_print_stats (void);
 bool is_valid (void *user_ptr);
-bool is_valid_stack (void *user_ptr);
+bool need_stack_grow (bool user, void *fault_addr, uint32_t esp);
+void stack_grow (void *upage, void *kpage);
+void free_kpage_and_exit (void *kpage);
+void load_file_lazily (void *kpage, struct sup_page_table_entry *spte);
 
 #endif /* userprog/exception.h */

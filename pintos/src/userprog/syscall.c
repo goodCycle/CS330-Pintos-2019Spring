@@ -16,7 +16,16 @@ static void syscall_handler (struct intr_frame *);
 int sys_write(int fd, const void *buffer, unsigned size);
 void* valid_pointer(void *ptr);
 
-// struct lock file_lock;
+struct lock file_lock;
+extern struct lock swap_lock;
+
+bool need_stack_grow_in_syscall (void *fault_addr)
+{
+  if ((thread_current()->user_esp - 32 <= fault_addr) && fault_addr >= 0x90000000){
+    return true;
+  }
+  return false;
+}
 
 void
 syscall_init (void) 
@@ -135,6 +144,82 @@ void* valid_pointer(void *ptr) {
   struct thread *curr = thread_current();
   ////////////////////////////////////////////////////////////////
   //page_fault 핸들링, 이상하게 read의 buffer_addr가 valid한지는 page fault가 안나옴 여기서 처리해야 할듯?!
+
+  /* _____________________________________________ */
+  // void *upage = pg_round_down (ptr);
+  // // Stack grow인 경우
+  // /* if (need_stack_grow_in_syscall(ptr)) {
+  //   void *kpage = palloc_get_page (PAL_USER);
+  //   stack_grow(upage, kpage);
+  // } */
+  // // Map page with frame
+  // if (spte_find(upage) && pagedir_get_page(curr->pagedir, ptr) == NULL) { 
+  //   if (ptr > 0x90000000) {
+  //     exit(-1);
+  //   }
+  //   // void *upage = pg_round_down (fault_addr);
+  //   struct sup_page_table_entry *find_spte = spte_find(upage);
+  //   // if (find_spte == NULL) exit(-1);
+
+  //   /* Get kpage to allocate frame */
+  //   void *kpage;
+  //   if (find_spte->page_read_bytes != 0)
+  //     kpage = palloc_get_page (PAL_USER);
+  //   else
+  //     kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+
+  //   /* Have kpage to allocate frame */
+  //   if (kpage != NULL) {
+  //     /* Lazy loading */
+  //     if (find_spte->from_load) {
+  //       load_file_lazily(kpage, find_spte);
+  //     }
+
+  //     /* Add kpage to frame */
+  //     struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
+  //     if (new_fte == NULL) free_kpage_and_exit(kpage);
+  //     if (install_page(upage, kpage, find_spte->writable)) {
+  //       find_spte->frame = kpage;
+  //       find_spte->is_in_frame = 1;
+  //     } else {
+  //       free_kpage_and_exit(kpage);
+  //     }
+  //   }
+  //   else { /* Frame eviction is needed */
+  //     if (!find_spte->is_mapped) {
+  //       swap_out();
+  //       if(find_spte->page_read_bytes > 0)
+  //         kpage = palloc_get_page(PAL_USER);
+  //       else
+  //         kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+  //       lock_release(&swap_lock);
+
+  //       load_file_lazily(kpage, find_spte);
+        
+  //       struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
+  //       if (new_fte == NULL) free_kpage_and_exit(kpage);
+  //       if (install_page(upage, kpage, find_spte->writable)) {
+  //         find_spte->frame = kpage;
+  //         find_spte->is_in_frame = 1;
+  //       } else {
+  //         free_kpage_and_exit(kpage);
+  //       }
+  //     }
+  //     else if (find_spte->is_in_swap) { /* page data is in swap */
+  //       kpage = evict_frame(upage);
+  //       // if (!install_page(upage, kpage, find_spte->writable)) free_kpage_and_exit(kpage);
+  //     }
+  //     else { /* page data is in file */
+
+  //     }
+  //   }
+  // }
+  // else if (need_stack_grow_in_syscall(ptr)) {
+  //   printf("stack \n");
+  //   void *kpage = palloc_get_page (PAL_USER);
+  //   stack_grow(upage, kpage);
+  // } 
+  /* _____________________________________________ */
   void *fault_addr = pg_round_down(ptr);
   struct sup_page_table_entry *find_spte = spte_find(fault_addr);
   if(find_spte && pagedir_get_page(curr->pagedir, ptr) == NULL)
