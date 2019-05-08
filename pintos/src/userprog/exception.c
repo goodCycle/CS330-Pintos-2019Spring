@@ -289,12 +289,9 @@ page_fault (struct intr_frame *f)
           free_kpage_and_exit(kpage);
         }
       }
-      else if (find_spte->is_in_swap) { /* page data is in swap */
+      else{ /* page data is in swap or file */
         kpage = evict_frame(upage);
         // if (!install_page(upage, kpage, find_spte->writable)) free_kpage_and_exit(kpage);
-      }
-      else { /* page data is in file */
-
       }
     }
   }

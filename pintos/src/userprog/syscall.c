@@ -135,7 +135,9 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_MMAP:
     {
       int *valid_fd = (int*)valid_pointer((void*)(f->esp+4));
+      printf("pass fd\n");
       int *valid_buffer_addr = (int *)valid_pointer((void*)(f->esp+8));
+      printf("pass buffer addr\n");
       int *valid_buffer = (int *)valid_pointer((void *)*valid_buffer_addr);
       f->eax = mmap(*valid_fd, (const void *)*valid_buffer_addr);
       break;
@@ -178,9 +180,7 @@ void* valid_pointer(void *ptr) {
     /* Have kpage to allocate frame */
     if (kpage != NULL) {
       /* Lazy loading */
-      if (find_spte->from_load) {
-        load_file_lazily(kpage, find_spte);
-      }
+      load_file_lazily(kpage, find_spte);
 
       /* Add kpage to frame */
       struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
@@ -499,6 +499,7 @@ mapid_t mmap(int fd, void *addr)
   lock_acquire(&file_lock);
   /* Handling fail case: file descriptors is 0 or 1. */
   if (fd == 0 || fd == 1) {
+    printf("fd is 0 or 1\n");
     lock_release(&file_lock);
     return -1;
   }
@@ -506,6 +507,7 @@ mapid_t mmap(int fd, void *addr)
   struct thread *curr = thread_current();
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
+    printf("no fd list\n");
     lock_release(&file_lock);
     return -1;
   }
@@ -521,6 +523,7 @@ mapid_t mmap(int fd, void *addr)
   }
   if (find == 0) {
     lock_release(&file_lock);
+    printf("no file\n");
     return -1;
   }
 
@@ -531,8 +534,11 @@ mapid_t mmap(int fd, void *addr)
   3. addr is 0 */
   if (file_length(file) == 0 || pg_ofs(addr) != 0 || addr == 0) {
     lock_release(&file_lock);
+    printf("file problem\n");
     return -1;
   }
+
+  printf("pass\n");
 
   /* Load page lazily in file */
   int file_size = file_length(file);

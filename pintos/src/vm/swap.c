@@ -84,6 +84,13 @@ swap_in (void *addr, void *kpage)
         spte->frame = kpage;
         spte->is_in_frame = 1;
     }
+    else
+    {
+        file_seek(spte->file, spte->ofs);
+        file_read(spte->file, kpage, spte->page_read_bytes);
+        memset (kpage + spte->page_read_bytes, 0, spte->page_zero_bytes);
+    }
+    
     struct frame_table_entry *fte = allocate_frame(kpage, spte);
     if(!fte){
         palloc_free_page(kpage);
@@ -123,16 +130,26 @@ swap_out (void)
     struct frame_table_entry *evicted_fte = hash_entry(evicted_elem, struct frame_table_entry, hash_elem);
     struct sup_page_table_entry *evicted_spte = evicted_fte->spte;
     
-    size_t bit_index = bitmap_scan(swap_table, 0, 1, 0);
-    bitmap_flip(swap_table, bit_index);
-	write_to_disk(evicted_fte->frame, bit_index);
-    
-    pagedir_clear_page(evicted_fte->owner->pagedir, evicted_spte->user_vaddr);
+    if(evicted_spte->is_in_swap)
+    {
+        size_t bit_index = bitmap_scan(swap_table, 0, 1, 0);
+        bitmap_flip(swap_table, bit_index);
+        write_to_disk(evicted_fte->frame, bit_index);
+
+        evicted_spte->bit_index = bit_index;
+    }
+    else
+    {
+        if(evicted_spte->dirty)
+        {
+            file_seek(evicted_spte->file, evicted_spte->ofs);
+            file_write(evicted_spte->file, evicted_spte->frame, evicted_spte->page_read_bytes);
+        }
+    }
     
     evicted_spte->is_in_frame = 0;
-    evicted_spte->is_in_swap = 1;
-    evicted_spte->bit_index = bit_index;
 
+    pagedir_clear_page(evicted_fte->owner->pagedir, evicted_spte->user_vaddr);
     palloc_free_page(evicted_fte->frame);
     free(evicted_fte); //
     return true;
