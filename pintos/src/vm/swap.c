@@ -6,6 +6,7 @@
 #include "vm/frame.h"
 #include "threads/thread.h"
 #include "userprog/pagedir.h"
+#include "threads/vaddr.h"
 
 /* The swap device */
 static struct disk *swap_device;

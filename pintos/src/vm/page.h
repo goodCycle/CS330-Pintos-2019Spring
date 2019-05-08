@@ -19,7 +19,8 @@ struct sup_page_table_entry
 	uint32_t *frame; // physical address of frame to reference frame table
 	bool is_in_frame;
 	bool is_in_swap; // 1이면 swap에, 0이면 file에
-	bool is_mapped; // mapping 된 적이 있었냐, **file로 바로 매핑된 경우 처리하기(mmap)
+	bool is_mapped; // frame과 mapping 된 적이 있었냐
+	bool is_mapped_mmap; // mmap에서 mapping 됐었던 경우
 	size_t bit_index;
 	struct hash_elem hash_elem;
 

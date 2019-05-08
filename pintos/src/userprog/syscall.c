@@ -521,14 +521,14 @@ mapid_t mmap(int fd, void *addr)
     // lock_release(&file_lock);
     return -1;
   }
-
+  lock_acquire(&file_lock);
   struct file *file = file_reopen(fd_info->file);
   /* Handling exit(-1) case
   1. file has zero bytes
   2. addr is not page-aligned
   3. addr is 0 */
   if (file_length(file) == 0 || pg_ofs(addr) != 0 || addr == 0) {
-    // lock_release(&file_lock);
+    lock_release(&file_lock);
     return -1;
   }
 
@@ -537,22 +537,30 @@ mapid_t mmap(int fd, void *addr)
   int ofs = 0;
   int writable = true;
   int return_mapid = curr->mapid;
+  void *upage = pg_round_down(addr);
   while (file_size > 0) {
     /* Do calculate how to fill this page.
         We will read PAGE_READ_BYTES bytes from FILE
         and zero the final PAGE_ZERO_BYTES bytes. */
+    
     size_t page_read_bytes = file_size < PGSIZE ? file_size : PGSIZE;
     size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-    void *upage = pg_round_down(addr);
+    upage = pg_round_down(upage);
     /* Check whether this file is mmap */
     struct sup_page_table_entry *find_spte = spte_find(upage);
-    if (find_spte) {
-      // lock_release(&file_lock);
+  
+    if (!find_spte) {
+      // (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load);
+      find_spte = allocate_page(upage, 0, 0, 0, file, ofs, page_read_bytes, page_zero_bytes, writable, 0); // Load하면 frame에 있다. 얘는 file 공간에서 온 애니까..
+    }
+    if (find_spte->is_mapped || find_spte->is_mapped_mmap) {
+      lock_release(&file_lock);
       return -1;
     }
-    // (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load);
-    allocate_page(upage, 0, 0, 0, file, ofs, page_read_bytes, page_zero_bytes, writable, 0); // Load하면 frame에 있다. 얘는 file 공간에서 온 애니까..
+
+    /* to pass mmap test - 코드 지저분해도 이해 부탁 */
+    find_spte->is_mapped_mmap = 1;
+    find_spte->page_read_bytes = page_read_bytes;
 
     struct mfile *mfile = malloc(sizeof(struct mfile));
     mfile->mapid = curr->mapid++;
@@ -566,6 +574,7 @@ mapid_t mmap(int fd, void *addr)
     upage += PGSIZE;
     ofs += page_read_bytes;
   }
+  lock_release(&file_lock);
   return return_mapid;
 }
   

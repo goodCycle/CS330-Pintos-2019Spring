@@ -28,6 +28,7 @@ allocate_page (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struc
     spte->is_in_frame = is_in_frame;
     spte->is_in_swap = is_in_swap;
     spte->is_mapped = 0;
+    spte->is_mapped_mmap = 0;
 
     spte->file = file;
     spte->page_read_bytes = page_read_bytes;
@@ -35,10 +36,10 @@ allocate_page (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struc
     spte->from_load = from_load;
     spte->writable = writable;
     spte->ofs = ofs;
-    /*
-    spte->dirty = 0
-	spte->accessed = 0
-    */
+    
+    spte->dirty = 0;
+	// spte->accessed = 0
+    
     
     hash_insert(&thread_current()->spt, &spte->hash_elem);
     return spte;

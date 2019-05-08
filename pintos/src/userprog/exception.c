@@ -79,7 +79,12 @@ void load_file_lazily(void *kpage, struct sup_page_table_entry *spte) {
     lock_release(&file_lock);
     exit(-1);
   }
+
+  /* if (spte->page_read_bytes < PGSIZE) {
+    memset (kpage, 0, PGSIZE);
+  } else { */
   memset (kpage + spte->page_read_bytes, 0, spte->page_zero_bytes);
+
   lock_release(&file_lock);
   return;
 }
