@@ -475,6 +475,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->user_fd = 2;
   list_init(&t->child_list);
   list_init(&t->fd_list);
+  list_init(&t->mfile_list);
   sema_init(&t->child_alive_sema, 1);
   sema_init(&t->parent_wait_in_sema, 0);
   sema_init(&t->child_load_sema, 0);

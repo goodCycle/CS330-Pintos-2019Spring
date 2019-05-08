@@ -135,10 +135,8 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_MMAP:
     {
       int *valid_fd = (int*)valid_pointer((void*)(f->esp+4));
-      printf("pass fd\n");
       int *valid_buffer_addr = (int *)valid_pointer((void*)(f->esp+8));
-      printf("pass buffer addr\n");
-      int *valid_buffer = (int *)valid_pointer((void *)*valid_buffer_addr);
+      // int *valid_buffer = (int *)valid_pointer((void *)*valid_buffer_addr);
       f->eax = mmap(*valid_fd, (const void *)*valid_buffer_addr);
       break;
     }
@@ -496,19 +494,17 @@ void close (int fd)
 
 mapid_t mmap(int fd, void *addr)
 {
-  lock_acquire(&file_lock);
+  // lock_acquire(&file_lock);
   /* Handling fail case: file descriptors is 0 or 1. */
   if (fd == 0 || fd == 1) {
-    printf("fd is 0 or 1\n");
-    lock_release(&file_lock);
+    // lock_release(&file_lock);
     return -1;
   }
   /* Find fd in the current thread's file list */
   struct thread *curr = thread_current();
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
-    printf("no fd list\n");
-    lock_release(&file_lock);
+    // lock_release(&file_lock);
     return -1;
   }
   struct file_info *fd_info;
@@ -522,8 +518,7 @@ mapid_t mmap(int fd, void *addr)
     }
   }
   if (find == 0) {
-    lock_release(&file_lock);
-    printf("no file\n");
+    // lock_release(&file_lock);
     return -1;
   }
 
@@ -533,12 +528,9 @@ mapid_t mmap(int fd, void *addr)
   2. addr is not page-aligned
   3. addr is 0 */
   if (file_length(file) == 0 || pg_ofs(addr) != 0 || addr == 0) {
-    lock_release(&file_lock);
-    printf("file problem\n");
+    // lock_release(&file_lock);
     return -1;
   }
-
-  printf("pass\n");
 
   /* Load page lazily in file */
   int file_size = file_length(file);
@@ -556,7 +548,7 @@ mapid_t mmap(int fd, void *addr)
     /* Check whether this file is mmap */
     struct sup_page_table_entry *find_spte = spte_find(upage);
     if (find_spte) {
-      lock_release(&file_lock);
+      // lock_release(&file_lock);
       return -1;
     }
     // (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load);
@@ -579,7 +571,7 @@ mapid_t mmap(int fd, void *addr)
   
 void munmap(mapid_t mapid)
 {
-  /* 1. unmap the mapping  */
+  // /* 1. unmap the mapping  */
   struct thread *curr = thread_current();
   struct mfile *find_mfile;
   struct list_elem *e, *next;
@@ -608,7 +600,7 @@ void munmap(mapid_t mapid)
     file_seek(find_spte->file, find_spte->ofs);
     file_write(find_spte->file, kpage, find_spte->page_read_bytes);
   }
-  /* Erase fte and spte together */
+  // /* Erase fte and spte together */
   remove_frame(find_spte->frame);
   free(find_mfile);
 }

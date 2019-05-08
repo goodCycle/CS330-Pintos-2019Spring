@@ -310,8 +310,8 @@ process_exit (void)
   {
     hash_elem = hash_next(&i);
     spte = hash_entry (hash_cur (&i), struct sup_page_table_entry, hash_elem);
-    if (spte->is_in_frame) {
-      remove_frame(spte->frame);
+    if (spte->is_in_frame && spte->frame != 0) {
+      // remove_frame(spte->frame);
     }
   }
 

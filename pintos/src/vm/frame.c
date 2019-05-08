@@ -81,7 +81,7 @@ remove_frame(void *kpage)
     struct frame_table_entry *fte = fte_find(kpage);
    
     hash_delete(&frame_table, &fte->hash_elem);
-    palloc_free_page(fte->frame);
+    // palloc_free_page(fte->frame);
 
     hash_delete(&fte->owner->spt, &fte->spte->hash_elem);
     free(fte->spte);
