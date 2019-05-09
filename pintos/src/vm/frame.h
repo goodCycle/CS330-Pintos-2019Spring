@@ -12,14 +12,11 @@ struct frame_table_entry
 	struct thread* owner;
 	struct sup_page_table_entry* spte;
 
-	struct hash_elem hash_elem;
+	struct list_elem elem;
 };
 
 void frame_init (void);
 struct frame_table_entry * allocate_frame (void *frame, struct sup_page_table_entry *spte);
 
-
-uint32_t frame_hash_func(struct hash_elem *e);
-bool frame_hash_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux);
 
 #endif /* vm/frame.h */

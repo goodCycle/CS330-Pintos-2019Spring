@@ -39,7 +39,7 @@ bool need_stack_grow (bool user, void *fault_addr, uint32_t esp)
   return false;
 }
 
-void stack_grow(void *upage, void *kpage) {
+void stack_grow (void *upage, void *kpage) {
   bool writable = true;
 
   if (kpage != NULL) {
@@ -238,10 +238,13 @@ page_fault (struct intr_frame *f)
 
 
   void *upage = pg_round_down (fault_addr);
+
   // Stack grow인 경우
   if (need_stack_grow(user, fault_addr, f->esp)) {
+    lock_acquire(&swap_lock);
     void *kpage = palloc_get_page (PAL_USER | PAL_ZERO);
     stack_grow(upage, kpage);
+    lock_release(&swap_lock);
   } 
   // Map page with frame
   else { 
@@ -281,9 +284,15 @@ page_fault (struct intr_frame *f)
           kpage = palloc_get_page(PAL_USER);
         else
           kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+        
+        if (file_read_at (find_spte->file, kpage, find_spte->page_read_bytes, find_spte->ofs) != (int) find_spte->page_read_bytes)
+        {
+          palloc_free_page (kpage);
+          lock_release(&swap_lock);
+          exit(-1);
+        }
+        memset (kpage + find_spte->page_read_bytes, 0, find_spte->page_zero_bytes);
         lock_release(&swap_lock);
-
-        load_file_lazily(kpage, find_spte);
         
         struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
         if (new_fte == NULL) free_kpage_and_exit(kpage);

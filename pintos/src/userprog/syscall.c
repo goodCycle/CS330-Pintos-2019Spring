@@ -534,7 +534,7 @@ mapid_t mmap(int fd, void *addr)
   int file_size = file_length(file);
   int ofs = 0;
   int writable = true;
-  int return_mapid = curr->mapid;
+  int return_mapid = curr->mapid++; //modify
   void *upage = pg_round_down(addr);
   while (file_size > 0) {
     /* Do calculate how to fill this page.
@@ -553,12 +553,12 @@ mapid_t mmap(int fd, void *addr)
     }
     // (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load);
     find_spte = allocate_page(upage, 0, 0, 0, file, ofs, page_read_bytes, page_zero_bytes, writable, 0); // Load하면 frame에 있다. 얘는 file 공간에서 온 애니까..
-
+    
     /* to pass mmap test - 코드 지저분해도 이해 부탁 */
     find_spte->page_read_bytes = page_read_bytes;
 
     struct mfile *mfile = malloc(sizeof(struct mfile));
-    mfile->mapid = curr->mapid++;
+    mfile->mapid = return_mapid;
     mfile->upage = upage;
     mfile->fd_info = fd_info;
     
@@ -576,36 +576,86 @@ mapid_t mmap(int fd, void *addr)
 void munmap(mapid_t mapid)
 {
   // /* 1. unmap the mapping  */
+  // printf("ummap?\n");
   struct thread *curr = thread_current();
   struct mfile *find_mfile;
   struct list_elem *e, *next;
 
   if (list_empty(&curr->mfile_list)) return;
 
-  int find = 0;
+  // int find = 0;
   for (e=list_begin(&curr->mfile_list); e != list_tail(&curr->mfile_list); e = next)
   {
     next = list_next(e);
     find_mfile = list_entry(e, struct mfile, elem);
     if (find_mfile->mapid == mapid) {
-      find = 1;
-      break;
+      // find = 1;
+      list_remove(&find_mfile->elem);
+
+      void *kpage;
+      struct sup_page_table_entry *find_spte = spte_find(find_mfile->upage);
+
+      if (pagedir_is_dirty(curr->pagedir, find_spte->user_vaddr)) {
+        if (!pagedir_get_page(curr->pagedir, find_spte->user_vaddr))
+          kpage = evict_frame(find_mfile->upage);
+        else
+          kpage = find_spte->frame;
+        file_write_at(find_spte->file, kpage, find_spte->page_read_bytes, find_spte->ofs);
+      }
+      // /* Erase fte and spte together */
+      if(find_spte->is_mapped && find_spte->frame != 0)
+        remove_frame(find_spte->frame);
+      else
+      {
+        hash_delete(&curr->spt, &find_spte->hash_elem);
+        free(find_spte);
+      }
+      free(find_mfile);
     }
   }
-  if (find == 0) return;
-  
-  list_remove(&find_mfile->elem);
-  void *kpage;
-  struct sup_page_table_entry *find_spte = spte_find(find_mfile->upage);
-  if (pagedir_is_dirty(curr->pagedir, find_spte->user_vaddr)) {
-    if (!pagedir_get_page(curr->pagedir, find_spte->user_vaddr)) {
-      kpage = evict_frame(find_mfile->upage);
-    }
-    file_seek(find_spte->file, find_spte->ofs);
-    file_write(find_spte->file, kpage, find_spte->page_read_bytes);
-  }
-  // /* Erase fte and spte together */
-  remove_frame(find_spte->frame);
-  free(find_mfile);
 }
 
+void mummap_all()
+{
+  // /* 1. unmap the mapping  */
+  struct thread *curr = thread_current();
+  struct mfile *find_mfile;
+  struct list_elem *e, *next;
+
+  if (list_empty(&curr->mfile_list)) return;
+
+  for (e=list_begin(&curr->mfile_list); e != list_tail(&curr->mfile_list); e = next)
+  {
+    next = list_next(e);
+    find_mfile = list_entry(e, struct mfile, elem);
+
+    list_remove(&find_mfile->elem);
+    // printf("find_mfile's upage is %08x, and mapid is %d\n", find_mfile->upage, find_mfile->mapid);
+    void *kpage;
+    struct sup_page_table_entry *find_spte = spte_find(find_mfile->upage);
+
+    lock_acquire(&file_lock);
+    if (pagedir_is_dirty(curr->pagedir, find_spte->user_vaddr)) {
+      if (!pagedir_get_page(curr->pagedir, find_spte->user_vaddr))
+        kpage = evict_frame(find_mfile->upage);
+      else
+        kpage = find_spte->frame;
+      file_write_at(find_spte->file, kpage, find_spte->page_read_bytes, find_spte->ofs);
+    }
+
+    // /* Erase fte and spte together */
+    if(find_spte->is_mapped && find_spte->frame != 0)
+      remove_frame(find_spte->frame);
+    else
+    {
+      hash_delete(&curr->spt, &find_spte->hash_elem);
+      free(find_spte);
+    }
+      
+    free(find_mfile);
+    lock_release(&file_lock);
+  }
+
+  // frame table mapping을 지워주기
+  frame_free_mapping_with_curr_thread(curr);
+}

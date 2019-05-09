@@ -127,8 +127,8 @@ swap_out (void)
 {
     lock_acquire(&swap_lock);
     
-    struct hash_elem *evicted_elem = delete_frame_entry(); //hash_delete(&frame_table, hash_cur (&i));
-    struct frame_table_entry *evicted_fte = hash_entry(evicted_elem, struct frame_table_entry, hash_elem);
+    struct list_elem *evicted_elem = delete_frame_entry();
+    struct frame_table_entry *evicted_fte = list_entry(evicted_elem, struct frame_table_entry, elem);
     struct sup_page_table_entry *evicted_spte = evicted_fte->spte;
     
     if(evicted_spte->is_in_swap)

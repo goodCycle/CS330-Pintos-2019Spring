@@ -22,6 +22,8 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+extern struct lock swap_lock;
+extern struct lock file_lock;
 
 /* Starts a new thread running a user program loadedm from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -284,6 +286,7 @@ process_exit (void)
   struct file_info *t;
   struct list_elem *e, *next;
   struct thread *child;
+  struct mfile *m;
 
   if(!list_empty(&curr->fd_list)){
     for(e = list_begin(&curr->fd_list);e != list_end(&curr->fd_list); e = next){
@@ -300,20 +303,24 @@ process_exit (void)
       wait(child->tid);
     }
   }
-  
-  struct hash_iterator i;
-  struct sup_page_table_entry *spte; 
-  hash_first (&i, &curr->spt);
-  struct hash_elem *hash_elem;
 
-  while (hash_elem) // Remove all the frame related to spte
-  {
-    hash_elem = hash_next(&i);
-    spte = hash_entry (hash_cur (&i), struct sup_page_table_entry, hash_elem);
-    if (spte->is_in_frame && spte->frame != 0) {
-      // remove_frame(spte->frame);
-    }
-  }
+  // ummap 과정
+  mummap_all();
+
+  // remove_frame을 해주는게 아니라 current_thread가 가지고 있는 mapid를 모두 찾아서 ummap시키는게 맞는듯?
+  // struct hash_iterator i;
+  // struct sup_page_table_entry *spte; 
+  // hash_first (&i, &curr->spt);
+  // struct hash_elem *hash_elem;
+
+  // while (hash_elem) // Remove all the frame related to spte
+  // {
+  //   hash_elem = hash_next(&i);
+  //   spte = hash_entry (hash_cur (&i), struct sup_page_table_entry, hash_elem);
+  //   if (spte->is_in_frame && spte->frame != 0) {
+  //     remove_frame(spte->frame);
+  //   }
+  // }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -462,6 +469,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   }
   
   /* Open executable file. */
+  lock_acquire(&file_lock);
   file = filesys_open (file_name_only);
   if (file == NULL) 
     {
@@ -545,6 +553,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (file_name_only, save_ptr, esp)) // change arguments of setup_stack
     goto done;
 
+
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
@@ -552,6 +561,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   palloc_free_page(file_name_only);
+  lock_release(&file_lock);
   return success;
 }
 
@@ -684,12 +694,25 @@ setup_stack (char* file_name, char* file_arguments, void **esp)
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+
       if (success)
         *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
+  else
+  {
+    swap_out();
+    kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+    lock_release(&swap_lock);
 
+    success = install_page(((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+    if (success)
+      *esp = PHYS_BASE;
+    else
+      palloc_free_page (kpage);
+  }
+  
   // Push arguments in the stack
   push_stack_arguments(file_name, file_arguments, esp);
 
