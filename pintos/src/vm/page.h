@@ -20,7 +20,6 @@ struct sup_page_table_entry
 	bool is_in_frame;
 	bool is_in_swap; // 1이면 swap에, 0이면 file에
 	bool is_mapped; // frame과 mapping 된 적이 있었냐
-	bool is_mapped_mmap; // mmap에서 mapping 됐었던 경우
 	size_t bit_index;
 	struct hash_elem hash_elem;
 

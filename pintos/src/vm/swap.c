@@ -141,7 +141,7 @@ swap_out (void)
     }
     else
     {
-        if(evicted_spte->dirty)
+        if (pagedir_is_dirty(thread_current()->pagedir, evicted_spte->user_vaddr))
         {
             file_seek(evicted_spte->file, evicted_spte->ofs);
             file_write(evicted_spte->file, evicted_spte->frame, evicted_spte->page_read_bytes);

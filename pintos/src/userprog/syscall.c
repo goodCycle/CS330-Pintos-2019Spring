@@ -210,11 +210,8 @@ void* valid_pointer(void *ptr) {
           free_kpage_and_exit(kpage);
         }
       }
-      else if (find_spte->is_in_swap) { /* page data is in swap */
+      else { /* page data is in swap or file */
         kpage = evict_frame(upage);
-      }
-      else { /* page data is in file */
-
       }
     }
   }
@@ -525,9 +522,10 @@ mapid_t mmap(int fd, void *addr)
   struct file *file = file_reopen(fd_info->file);
   /* Handling exit(-1) case
   1. file has zero bytes
-  2. addr is not page-aligned
-  3. addr is 0 */
-  if (file_length(file) == 0 || pg_ofs(addr) != 0 || addr == 0) {
+  2. addr is not page-aligned, not user_vaddr
+  3. addr is 0 
+  4. addr is in stack segment(not loaded, but stack grow regin */
+  if (file_length(file) == 0 || pg_ofs(addr) != 0 || addr == 0 || !is_user_vaddr(addr) || addr >= 0x90000000) {
     lock_release(&file_lock);
     return -1;
   }
@@ -549,17 +547,14 @@ mapid_t mmap(int fd, void *addr)
     /* Check whether this file is mmap */
     struct sup_page_table_entry *find_spte = spte_find(upage);
   
-    if (!find_spte) {
-      // (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load);
-      find_spte = allocate_page(upage, 0, 0, 0, file, ofs, page_read_bytes, page_zero_bytes, writable, 0); // Load하면 frame에 있다. 얘는 file 공간에서 온 애니까..
-    }
-    if (find_spte->is_mapped || find_spte->is_mapped_mmap) {
+    if (find_spte != NULL) {
       lock_release(&file_lock);
       return -1;
     }
+    // (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load);
+    find_spte = allocate_page(upage, 0, 0, 0, file, ofs, page_read_bytes, page_zero_bytes, writable, 0); // Load하면 frame에 있다. 얘는 file 공간에서 온 애니까..
 
     /* to pass mmap test - 코드 지저분해도 이해 부탁 */
-    find_spte->is_mapped_mmap = 1;
     find_spte->page_read_bytes = page_read_bytes;
 
     struct mfile *mfile = malloc(sizeof(struct mfile));
@@ -602,7 +597,7 @@ void munmap(mapid_t mapid)
   list_remove(&find_mfile->elem);
   void *kpage;
   struct sup_page_table_entry *find_spte = spte_find(find_mfile->upage);
-  if (find_spte->dirty) {
+  if (pagedir_is_dirty(curr->pagedir, find_spte->user_vaddr)) {
     if (!pagedir_get_page(curr->pagedir, find_spte->user_vaddr)) {
       kpage = evict_frame(find_mfile->upage);
     }

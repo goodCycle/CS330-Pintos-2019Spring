@@ -240,7 +240,7 @@ page_fault (struct intr_frame *f)
   void *upage = pg_round_down (fault_addr);
   // Stack grow인 경우
   if (need_stack_grow(user, fault_addr, f->esp)) {
-    void *kpage = palloc_get_page (PAL_USER);
+    void *kpage = palloc_get_page (PAL_USER | PAL_ZERO);
     stack_grow(upage, kpage);
   } 
   // Map page with frame
