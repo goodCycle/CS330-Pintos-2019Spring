@@ -11,8 +11,13 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "hash.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
+#include "vm/page.h"
 #endif
 
 
@@ -72,6 +77,7 @@ static void schedule (void);
 void schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -95,6 +101,11 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
+
+  //
+  /* swap_init ();
+  frame_init ();
+  */
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -464,10 +475,12 @@ init_thread (struct thread *t, const char *name, int priority)
   t->user_fd = 2;
   list_init(&t->child_list);
   list_init(&t->fd_list);
+  list_init(&t->mfile_list);
   sema_init(&t->child_alive_sema, 1);
   sema_init(&t->parent_wait_in_sema, 0);
   sema_init(&t->child_load_sema, 0);
   t->is_wait_called = 0;
+  t->mapid = 0;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

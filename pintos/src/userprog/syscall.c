@@ -1,17 +1,30 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <stdbool.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-
+#include "userprog/exception.h"
 #include "threads/init.h"
+#include "vm/page.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
+#include "threads/palloc.h"
 
 static void syscall_handler (struct intr_frame *);
 int sys_write(int fd, const void *buffer, unsigned size);
 void* valid_pointer(void *ptr);
 
 struct lock file_lock;
+
+bool need_stack_grow_in_syscall (void *fault_addr)
+{
+  if ((thread_current()->user_esp - 32 <= fault_addr) && fault_addr >= 0x90000000){
+    return true;
+  }
+  return false;
+}
 
 void
 syscall_init (void) 
@@ -25,6 +38,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 {
   int *valid_syscall_num = (int *)valid_pointer((void*)(f->esp));
   int syscall_num = *valid_syscall_num;
+  thread_current()->user_esp = f->esp;
 
   switch(syscall_num){
     case SYS_HALT:
@@ -116,17 +130,106 @@ syscall_handler (struct intr_frame *f UNUSED)
       close(*valid_fd);
       break;
     }
+    case SYS_MMAP:
+    {
+      int *valid_fd = (int*)valid_pointer((void*)(f->esp+4));
+      int *valid_buffer_addr = (int *)valid_pointer((void*)(f->esp+8));
+      // int *valid_buffer = (int *)valid_pointer((void *)*valid_buffer_addr);
+      f->eax = mmap(*valid_fd, (const void *)*valid_buffer_addr);
+      break;
+    }
+    case SYS_MUNMAP:
+    {
+      int *valid_mapid = (int*)valid_pointer((void*)(f->esp+4));
+      munmap(*valid_mapid);
+      break;
+    }
   }
 }
 
 void* valid_pointer(void *ptr) {
+  // syscall에서 code segment에 write..?
   if(ptr == NULL || !is_user_vaddr(ptr) || ptr < (void *) 0x08048000)
 	{
     exit(-1);
 	}
   struct thread *curr = thread_current();
-  if (pagedir_get_page(curr->pagedir, ptr) == NULL)
+  ////////////////////////////////////////////////////////////////
+  //page_fault 핸들링, 이상하게 read의 buffer_addr가 valid한지는 page fault가 안나옴 여기서 처리해야 할듯?!
+
+  void *upage = pg_round_down (ptr);
+
+  // // Map page with frame
+  if (spte_find(upage) && pagedir_get_page(curr->pagedir, ptr) == NULL) { 
+    if (ptr > 0x90000000) {
+      exit(-1);
+    }
+    struct sup_page_table_entry *find_spte = spte_find(upage);
+
+    /* Get kpage to allocate frame */
+    void *kpage;
+    if (find_spte->page_read_bytes != 0)
+      kpage = palloc_get_page (PAL_USER);
+    else
+      kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+
+    /* Have kpage to allocate frame */
+    if (kpage != NULL) {
+      /* Lazy loading */
+      load_file_lazily(kpage, find_spte);
+
+      /* Add kpage to frame */
+      struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
+      if (new_fte == NULL) free_kpage_and_exit(kpage);
+      if (install_page(upage, kpage, find_spte->writable)) {
+        find_spte->frame = kpage;
+        find_spte->is_in_frame = 1;
+      } else {
+        free_kpage_and_exit(kpage);
+      }
+    }
+    else { /* Frame eviction is needed */
+      if (!find_spte->is_mapped) {
+        swap_out();
+        if(find_spte->page_read_bytes > 0)
+          kpage = palloc_get_page(PAL_USER);
+        else
+          kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+        while(!kpage)
+        {
+          swap_out();
+          if(find_spte->page_read_bytes > 0)
+            kpage = palloc_get_page(PAL_USER);
+          else
+            kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+        }
+        load_file_lazily(kpage, find_spte);
+
+        struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
+        if (new_fte == NULL) free_kpage_and_exit(kpage);
+        if (install_page(upage, kpage, find_spte->writable)) {
+          find_spte->frame = kpage;
+          find_spte->is_in_frame = 1;
+        } else {
+          free_kpage_and_exit(kpage);
+        }
+      }
+      else { /* page data is in swap or file */
+        kpage = evict_frame(upage);
+      }
+    }
+  }
+  else if (need_stack_grow_in_syscall(ptr) && pagedir_get_page(curr->pagedir, ptr) == NULL) {
+    void *kpage = palloc_get_page (PAL_USER);
+    stack_grow(upage, kpage);
+  } 
+  // 추가로 여기에 stack growth 도 해줘야하는가? 지금 pt-grow-stk-sc가 여기인거같은데..? stack syscall = stk-sc??
+  ////////////////////////////////////////////////////////////////
+  else if (pagedir_get_page(curr->pagedir, ptr) == NULL)
   {
+    exit(-1);
+  }
+  if(!(ptr > 0x80480a0UL)) {
     exit(-1);
   }
   return ptr;
@@ -224,6 +327,10 @@ int filesize (int fd)
 int read (int fd, void *buffer, unsigned size)
 {
   //
+  int i;
+  for(i=1;i<size/4096 + 1;i++)
+    valid_pointer((void *)(buffer + i * 4096));
+    
   lock_acquire(&file_lock);
 
   if (fd==0) {
@@ -262,6 +369,10 @@ int read (int fd, void *buffer, unsigned size)
 
 int write (int fd, const void *buffer, unsigned length)
 {
+  int i;
+  for(i=1;i<length/4096 + 1;i++)
+    valid_pointer((void *)(buffer + i * 4096));
+
   lock_acquire(&file_lock);
   if (fd == 1) {
     putbuf(buffer, length);
@@ -380,4 +491,177 @@ void close (int fd)
   list_remove(&fd_info->elem);
   palloc_free_page(fd_info);
   lock_release(&file_lock);
+}
+
+mapid_t mmap(int fd, void *addr)
+{
+  // lock_acquire(&file_lock);
+  /* Handling fail case: file descriptors is 0 or 1. */
+  if (fd == 0 || fd == 1) {
+    // lock_release(&file_lock);
+    return -1;
+  }
+  /* Find fd in the current thread's file list */
+  struct thread *curr = thread_current();
+  struct list_elem *e, *next;
+  if (list_empty(&curr->fd_list)) {
+    // lock_release(&file_lock);
+    return -1;
+  }
+  struct file_info *fd_info;
+  int find = 0;
+  for (e=list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = next) {
+    next = list_next(e);
+    fd_info = list_entry(e, struct file_info, elem);
+    if (fd_info->fd == fd) {
+      find = 1;
+      break;
+    }
+  }
+  if (find == 0) {
+    // lock_release(&file_lock);
+    return -1;
+  }
+  lock_acquire(&file_lock);
+  struct file *file = file_reopen(fd_info->file);
+  /* Handling exit(-1) case
+  1. file has zero bytes
+  2. addr is not page-aligned, not user_vaddr
+  3. addr is 0 
+  4. addr is in stack segment(not loaded, but stack grow regin */
+  if (file_length(file) == 0 || pg_ofs(addr) != 0 || addr == 0 || !is_user_vaddr(addr) || addr >= 0x90000000) {
+    lock_release(&file_lock);
+    return -1;
+  }
+
+  /* Load page lazily in file */
+  int file_size = file_length(file);
+  int ofs = 0;
+  int writable = true;
+  int return_mapid = curr->mapid++; //modify
+  void *upage = pg_round_down(addr);
+  while (file_size > 0) {
+    /* Do calculate how to fill this page.
+        We will read PAGE_READ_BYTES bytes from FILE
+        and zero the final PAGE_ZERO_BYTES bytes. */
+    
+    size_t page_read_bytes = file_size < PGSIZE ? file_size : PGSIZE;
+    size_t page_zero_bytes = PGSIZE - page_read_bytes;
+    upage = pg_round_down(upage);
+    /* Check whether this file is mmap */
+    struct sup_page_table_entry *find_spte = spte_find(upage);
+  
+    if (find_spte != NULL) {
+      lock_release(&file_lock);
+      return -1;
+    }
+    // (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load);
+    find_spte = allocate_page(upage, 0, 0, 0, file, ofs, page_read_bytes, page_zero_bytes, writable, 0); // Load하면 frame에 있다. 얘는 file 공간에서 온 애니까..
+    
+    /* to pass mmap test - 코드 지저분해도 이해 부탁 */
+    find_spte->page_read_bytes = page_read_bytes;
+
+    struct mfile *mfile = malloc(sizeof(struct mfile));
+    mfile->mapid = return_mapid;
+    mfile->upage = upage;
+    mfile->fd_info = fd_info;
+    
+    list_push_back(&curr->mfile_list, &mfile->elem);
+
+    /* Advance. */
+    file_size -= page_read_bytes;
+    upage += PGSIZE;
+    ofs += page_read_bytes;
+  }
+  lock_release(&file_lock);
+  return return_mapid;
+}
+  
+void munmap(mapid_t mapid)
+{
+  // /* 1. unmap the mapping  */
+  // printf("ummap?\n");
+  struct thread *curr = thread_current();
+  struct mfile *find_mfile;
+  struct list_elem *e, *next;
+
+  if (list_empty(&curr->mfile_list)) return;
+
+  lock_acquire(&file_lock);
+  for (e=list_begin(&curr->mfile_list); e != list_tail(&curr->mfile_list); e = next)
+  {
+    next = list_next(e);
+    find_mfile = list_entry(e, struct mfile, elem);
+    if (find_mfile->mapid == mapid) {
+      // find = 1;
+      list_remove(&find_mfile->elem);
+
+      void *kpage;
+      struct sup_page_table_entry *find_spte = spte_find(find_mfile->upage);
+
+      if (pagedir_is_dirty(curr->pagedir, find_spte->user_vaddr)) {
+        if (!pagedir_get_page(curr->pagedir, find_spte->user_vaddr))
+          kpage = evict_frame(find_mfile->upage);
+        else
+          kpage = find_spte->frame;
+        file_write_at(find_spte->file, kpage, find_spte->page_read_bytes, find_spte->ofs);
+      }
+      // /* Erase fte and spte together */
+      if(find_spte->is_mapped && find_spte->is_in_frame == 1 && find_spte->frame != 0)
+        remove_frame(find_spte->frame);
+      else
+      {
+        hash_delete(&curr->spt, &find_spte->hash_elem);
+        free(find_spte);
+      }
+      free(find_mfile);
+    }
+  }
+  lock_release(&file_lock);
+}
+
+void mummap_all()
+{
+  // /* 1. unmap the mapping  */
+  struct thread *curr = thread_current();
+  struct mfile *find_mfile;
+  struct list_elem *e, *next;
+
+  if (list_empty(&curr->mfile_list)) return;
+
+  lock_acquire(&file_lock);
+
+  for (e=list_begin(&curr->mfile_list); e != list_tail(&curr->mfile_list); e = next)
+  {
+    next = list_next(e);
+    find_mfile = list_entry(e, struct mfile, elem);
+
+    list_remove(&find_mfile->elem);
+    // printf("find_mfile's upage is %08x, and mapid is %d\n", find_mfile->upage, find_mfile->mapid);
+    void *kpage;
+    struct sup_page_table_entry *find_spte = spte_find(find_mfile->upage);
+
+    if (pagedir_is_dirty(curr->pagedir, find_spte->user_vaddr)) {
+      if (!pagedir_get_page(curr->pagedir, find_spte->user_vaddr))
+        kpage = evict_frame(find_mfile->upage);
+      else
+        kpage = find_spte->frame;
+      file_write_at(find_spte->file, kpage, find_spte->page_read_bytes, find_spte->ofs);
+    }
+
+    // /* Erase fte and spte together */
+    if(find_spte->is_mapped && find_spte->is_in_frame == 1 && find_spte->frame != 0)
+      remove_frame(find_spte->frame);
+    else
+    {
+      hash_delete(&curr->spt, &find_spte->hash_elem);
+      free(find_spte);
+    }
+    free(find_mfile);
+  }
+  lock_release(&file_lock);
+
+
+  // frame table mapping을 지워주기
+  frame_free_mapping_with_curr_thread(curr);
 }

@@ -17,10 +17,12 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "vm/page.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+extern struct lock file_lock;
 
 /* Starts a new thread running a user program loadedm from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -105,6 +107,8 @@ start_process (void *f_name)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+  // Initialize supplement page table of user process
+  page_init();
   success = load (file_name, &if_.eip, &if_.esp);
 
   // 
@@ -281,6 +285,7 @@ process_exit (void)
   struct file_info *t;
   struct list_elem *e, *next;
   struct thread *child;
+  struct mfile *m;
 
   if(!list_empty(&curr->fd_list)){
     for(e = list_begin(&curr->fd_list);e != list_end(&curr->fd_list); e = next){
@@ -297,7 +302,9 @@ process_exit (void)
       wait(child->tid);
     }
   }
-  
+
+  // ummap 과정
+  mummap_all();
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -446,6 +453,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   }
   
   /* Open executable file. */
+  lock_acquire(&file_lock);
   file = filesys_open (file_name_only);
   if (file == NULL) 
     {
@@ -529,6 +537,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (file_name_only, save_ptr, esp)) // change arguments of setup_stack
     goto done;
 
+
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
@@ -536,12 +545,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   palloc_free_page(file_name_only);
+  lock_release(&file_lock);
   return success;
 }
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
+bool install_page (void *upage, void *kpage, bool writable);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -620,29 +630,38 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
       /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
-        return false;
+      // uint8_t *kpage = palloc_get_page (PAL_USER);
+      // if (kpage == NULL)
+      //   return false;
 
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+      // /* Load this page. */
+      // if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+      //   {
+      //     palloc_free_page (kpage);
+      //     return false; 
+      //   }
+      // memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
+      // /* Add the page to the process's address space. 여기도 spte에 추가 */
+      // if (!install_page (upage, kpage, writable)) 
+      // {
+      //     palloc_free_page (kpage);
+      //     return false; 
+      // }
+
+      // printf("upage is %08x, kpage is %08x\n, writable is %08x\n", upage, kpage, writable);
+      
+      // 여기서 spte만 만들어서 추가만 해줘야 됨......
+      // (void *addr, void *frame, bool is_in_frame, bool is_in_swap, struct file *file, off_t ofs, size_t page_read_bytes, size_t page_zero_bytes, bool writable, bool from_load);
+      allocate_page(upage, 0, 0, 1, file, ofs, page_read_bytes, page_zero_bytes, writable, 1); // Load하면 frame에 있다. 얘는 file 공간에서 온 애니까..
+      //
+      // printf("upage is %08x\n", upage);
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      ofs += page_read_bytes;
     }
   return true;
 }
@@ -659,12 +678,29 @@ setup_stack (char* file_name, char* file_arguments, void **esp)
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+
       if (success)
         *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
+  else
+  {
+    swap_out();
+    kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+    while(!kpage)
+    {
+        swap_out();
+        kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+    }
 
+    success = install_page(((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+    if (success)
+      *esp = PHYS_BASE;
+    else
+      palloc_free_page (kpage);
+  }
+  
   // Push arguments in the stack
   push_stack_arguments(file_name, file_arguments, esp);
 
@@ -680,7 +716,7 @@ setup_stack (char* file_name, char* file_arguments, void **esp)
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-static bool
+bool
 install_page (void *upage, void *kpage, bool writable)
 {
   struct thread *t = thread_current ();

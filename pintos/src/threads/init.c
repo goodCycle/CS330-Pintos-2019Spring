@@ -26,6 +26,9 @@
 #include "userprog/gdt.h"
 #include "userprog/syscall.h"
 #include "userprog/tss.h"
+#include "vm/page.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
 #else
 #include "tests/threads/tests.h"
 #endif
@@ -114,6 +117,8 @@ main (void)
   disk_init ();
   filesys_init (format_filesys);
 #endif
+  swap_init ();
+  frame_init ();
 
   printf ("Boot complete.\n");
   

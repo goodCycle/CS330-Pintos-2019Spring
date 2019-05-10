@@ -1,8 +1,12 @@
 #include "vm/swap.h"
+#include "vm/page.h"
 #include "devices/disk.h"
 #include "threads/synch.h"
 #include <bitmap.h>
-
+#include "vm/frame.h"
+#include "threads/thread.h"
+#include "userprog/pagedir.h"
+#include "threads/vaddr.h"
 
 /* The swap device */
 static struct disk *swap_device;
@@ -11,7 +15,10 @@ static struct disk *swap_device;
 static struct bitmap *swap_table;
 
 /* Protects swap_table */
-static struct lock swap_lock;
+struct lock swap_lock;
+
+//
+// extern struct hash frame_table;
 
 /* 
  * Initialize swap_device, swap_table, and swap_lock.
@@ -19,7 +26,16 @@ static struct lock swap_lock;
 void 
 swap_init (void)
 {
+    swap_device = disk_get(1,1);
+    if(swap_device == NULL) 
+        return;
+    disk_sector_t swap_size = disk_size(swap_device);
 
+    swap_table = bitmap_create(swap_size/8);
+    if(swap_table == NULL) 
+        return;
+
+    lock_init(&swap_lock);
 }
 
 /*
@@ -35,10 +51,63 @@ swap_init (void)
  * of the disk into the frame. 
  */ 
 bool 
-swap_in (void *addr)
-{
+swap_in (void *addr, void *kpage)
+{   
+    lock_acquire(&swap_lock);
+    struct thread *curr = thread_current();
+    struct hash_iterator i;
+    struct sup_page_table_entry *spte; 
+    hash_first (&i, &curr->spt);
 
+    while (hash_next (&i)) //find spte
+    {
+        spte = hash_entry (hash_cur (&i), struct sup_page_table_entry, hash_elem);
+        if(spte->user_vaddr == addr)
+            break;
+    }
 
+    if(spte == NULL){
+        lock_release(&swap_lock);
+        return false;
+    }
+        
+    if(spte->is_in_frame){
+        lock_release(&swap_lock);
+        return false;
+    }
+        
+    if (spte->is_mapped) {
+        size_t bit_index = spte->bit_index;
+        
+        // swap에도 없는 경우
+        read_from_disk(kpage, bit_index); //kpage의 정보를 bit_index에 read
+        bitmap_flip(swap_table, bit_index); //flip
+
+        spte->frame = kpage;
+        spte->is_in_frame = 1;
+    }
+    else
+    {
+        file_seek(spte->file, spte->ofs);
+        file_read(spte->file, kpage, spte->page_read_bytes);
+        memset (kpage + spte->page_read_bytes, 0, spte->page_zero_bytes);
+    }
+
+    struct frame_table_entry *fte = allocate_frame(kpage, spte);
+    if(!fte){
+        palloc_free_page(kpage);
+        free(fte);
+        lock_release(&swap_lock);
+        return false;
+    }
+    
+    if(!install_page(addr, kpage, spte->writable)){
+        palloc_free_page(kpage);
+        lock_release(&swap_lock);
+        return false;
+    }
+    lock_release(&swap_lock);
+    return true;
 }
 
 /* 
@@ -58,8 +127,34 @@ swap_in (void *addr)
 bool
 swap_out (void)
 {
+    lock_acquire(&swap_lock);
+    struct list_elem *evicted_elem = delete_frame_entry();
+    struct frame_table_entry *evicted_fte = list_entry(evicted_elem, struct frame_table_entry, elem);
+    struct sup_page_table_entry *evicted_spte = evicted_fte->spte;
 
+    if(evicted_spte->is_in_swap)
+    {
+        size_t bit_index = bitmap_scan(swap_table, 0, 1, 0);
+        bitmap_flip(swap_table, bit_index);
+        write_to_disk(evicted_fte->frame, bit_index);
 
+        evicted_spte->bit_index = bit_index;
+    }
+    else
+    {
+        if (pagedir_is_dirty(thread_current()->pagedir, evicted_spte->user_vaddr))
+        {
+            file_seek(evicted_spte->file, evicted_spte->ofs);
+            file_write(evicted_spte->file, evicted_spte->frame, evicted_spte->page_read_bytes);
+        }
+    }
+    evicted_spte->is_in_frame = 0;
+
+    pagedir_clear_page(evicted_fte->owner->pagedir, evicted_spte->user_vaddr);
+    palloc_free_page(evicted_fte->frame);
+    free(evicted_fte); //
+    lock_release(&swap_lock);
+    return true;
 }
 
 /* 
@@ -68,14 +163,15 @@ swap_out (void)
  */
 void read_from_disk (uint8_t *frame, int index)
 {
-
-
+    int i=0;
+    for(i=0;i<8;i++)
+        disk_read(swap_device, (disk_sector_t)(index*8+i), frame+i*512);
 }
 
 /* Write data to swap device from frame */
 void write_to_disk (uint8_t *frame, int index)
 {
-
-
+    int i=0;
+    for(i=0;i<8;i++)
+        disk_write(swap_device, (disk_sector_t)(index*8+i), frame+i*512);
 }
-

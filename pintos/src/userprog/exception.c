@@ -5,12 +5,88 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/palloc.h"
+#include "userprog/process.h"
+#include "userprog/syscall.h"
+#include "vm/page.h"
+#include "vm/swap.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+
+
+bool is_valid (void *user_ptr)
+{
+  if(user_ptr == NULL || !is_user_vaddr(user_ptr) || user_ptr < (void *) 0x08048000) {
+    return 0;
+	}
+  return 1;
+}
+
+bool need_stack_grow (bool user, void *fault_addr, uint32_t esp)
+{
+  if (user && esp-32 <= fault_addr && fault_addr >= 0x90000000){
+    return true;
+  }
+  if (!user && (thread_current()->user_esp - 32 <= fault_addr) && fault_addr >= 0x90000000){
+    return true;
+  }
+  return false;
+}
+
+void stack_grow (void *upage, void *kpage) {
+  bool writable = true;
+
+  if (kpage != NULL) {
+    if(!install_page(upage, kpage, writable)) free_kpage_and_exit(kpage);
+
+    // spte에 추가
+    struct sup_page_table_entry *new_spte = allocate_page(upage, kpage, 1, 1, NULL, 0, 0, 0, 1, 0); // is_in_frame
+    if (new_spte == NULL) free_kpage_and_exit(kpage);
+    
+    // frame table에 추가
+    struct frame_table_entry *new_fte = allocate_frame(kpage, new_spte);
+    if (new_fte == NULL) free_kpage_and_exit(kpage);
+    else new_spte->is_in_frame = 1;
+  }
+  else{ // frame eviction
+    swap_out();
+    kpage = palloc_get_page(PAL_USER);
+    while(!kpage)
+    {
+      swap_out();
+      kpage = palloc_get_page(PAL_USER);
+    }
+
+    struct sup_page_table_entry *new_spte = allocate_page(upage, kpage, 0, 1, NULL, 0, 0, 0, 1, 0); // frame 꽉 참
+    allocate_frame(kpage, new_spte);
+    install_page(upage, kpage, writable);
+    new_spte->is_in_frame = 1;
+  }
+}
+
+void free_kpage_and_exit(void *kpage) {
+    palloc_free_page(kpage);
+    exit(-1);
+}
+
+void load_file_lazily(void *kpage, struct sup_page_table_entry *spte) {
+  lock_acquire(&file_lock);
+  if (file_read_at (spte->file, kpage, spte->page_read_bytes, spte->ofs) != (int) spte->page_read_bytes)
+  {
+    palloc_free_page (kpage);
+    lock_release(&file_lock);
+    exit(-1);
+  }
+
+  memset (kpage + spte->page_read_bytes, 0, spte->page_zero_bytes);
+
+  lock_release(&file_lock);
+  return;
+}
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -149,28 +225,101 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
  
-  if (!is_valid ((int32_t) fault_addr)){
+  // printf("fault addr %08x \n", fault_addr);
+  if (user && !is_valid ((int32_t) fault_addr)){
     exit (-1);
   }
+
+  // pt-write-code 막기 위해 write on read-only page 면 exit
+  if (!not_present) {
+    exit(-1);
+  }
+
+
+  void *upage = pg_round_down (fault_addr);
+
+  // Stack grow인 경우
+  if (need_stack_grow(user, fault_addr, f->esp)) {
+    void *kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+    stack_grow(upage, kpage);
+  } 
+  // Map page with frame
+  else { 
+    if (fault_addr > 0x90000000) {
+      exit(-1);
+    }
+    // void *upage = pg_round_down (fault_addr);
+    struct sup_page_table_entry *find_spte = spte_find(upage);
+    if (find_spte == NULL) exit(-1);
+
+    /* Get kpage to allocate frame */
+    void *kpage;
+    if (find_spte->page_read_bytes != 0)
+      kpage = palloc_get_page (PAL_USER);
+    else
+      kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+
+    /* Have kpage to allocate frame */
+    if (kpage != NULL) {
+      /* Lazy loading */
+      load_file_lazily(kpage, find_spte);
+
+      /* Add kpage to frame */
+      struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
+      if (new_fte == NULL) free_kpage_and_exit(kpage);
+      if (install_page(upage, kpage, find_spte->writable)) {
+        find_spte->frame = kpage;
+        find_spte->is_in_frame = 1;
+      } else {
+        free_kpage_and_exit(kpage);
+      }
+    }
+    else { /* Frame eviction is needed */
+      if (!find_spte->is_mapped) {
+        swap_out();
+        if(find_spte->page_read_bytes > 0)
+          kpage = palloc_get_page(PAL_USER);
+        else
+          kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+        while(!kpage)
+        {    
+          swap_out();
+          if(find_spte->page_read_bytes > 0)
+            kpage = palloc_get_page(PAL_USER);
+          else
+            kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+        }
+
+        if (file_read_at (find_spte->file, kpage, find_spte->page_read_bytes, find_spte->ofs) != (int) find_spte->page_read_bytes)
+        {
+          palloc_free_page (kpage);
+          exit(-1); //여기서 나감
+        }
+        memset (kpage + find_spte->page_read_bytes, 0, find_spte->page_zero_bytes);
+        
+        struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
+        if (new_fte == NULL) free_kpage_and_exit(kpage);
+        if (install_page(upage, kpage, find_spte->writable)) {
+          find_spte->frame = kpage;
+          find_spte->is_in_frame = 1;
+        } else {
+          free_kpage_and_exit(kpage);
+        }
+      }
+      else{ /* page data is in swap or file */
+        kpage = evict_frame(upage);
+        // if (!install_page(upage, kpage, find_spte->writable)) free_kpage_and_exit(kpage);
+      }
+    }
+  }
+
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
+  /* printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
           not_present ? "not present" : "rights violation",
           write ? "writing" : "reading",
           user ? "user" : "kernel");
-  kill (f);
-}
-
-bool is_valid (int32_t user_ptr)
-{
-  if(user_ptr == NULL || !is_user_vaddr(user_ptr) || user_ptr < (void *) 0x08048000) {
-    return 0;
-	}
-  struct thread *curr = thread_current();
-  if (pagedir_get_page(curr->pagedir, user_ptr) == NULL) {
-    return 0;
-  }
-  return 1;
+  kill (f); */
 }

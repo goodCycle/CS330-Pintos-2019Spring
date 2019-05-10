@@ -6,6 +6,8 @@
 
 typedef int pid_t;
 
+struct lock file_lock;
+
 void syscall_init (void);
 
 //
@@ -23,5 +25,7 @@ int write (int fd, const void *buffer, unsigned length);
 void seek (int fd, unsigned position);
 unsigned tell (int fd);
 void close (int fd);
+
+void mummap_all(void);
 
 #endif /* userprog/syscall.h */
