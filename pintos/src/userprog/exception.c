@@ -14,8 +14,6 @@
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
-extern struct lock swap_lock;
-
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
 
@@ -57,7 +55,11 @@ void stack_grow (void *upage, void *kpage) {
   else{ // frame eviction
     swap_out();
     kpage = palloc_get_page(PAL_USER);
-    lock_release(&swap_lock);
+    while(!kpage)
+    {
+      swap_out();
+      kpage = palloc_get_page(PAL_USER);
+    }
 
     struct sup_page_table_entry *new_spte = allocate_page(upage, kpage, 0, 1, NULL, 0, 0, 0, 1, 0); // frame 꽉 참
     allocate_frame(kpage, new_spte);
@@ -80,9 +82,6 @@ void load_file_lazily(void *kpage, struct sup_page_table_entry *spte) {
     exit(-1);
   }
 
-  /* if (spte->page_read_bytes < PGSIZE) {
-    memset (kpage, 0, PGSIZE);
-  } else { */
   memset (kpage + spte->page_read_bytes, 0, spte->page_zero_bytes);
 
   lock_release(&file_lock);
@@ -241,10 +240,8 @@ page_fault (struct intr_frame *f)
 
   // Stack grow인 경우
   if (need_stack_grow(user, fault_addr, f->esp)) {
-    lock_acquire(&swap_lock);
     void *kpage = palloc_get_page (PAL_USER | PAL_ZERO);
     stack_grow(upage, kpage);
-    lock_release(&swap_lock);
   } 
   // Map page with frame
   else { 
@@ -284,15 +281,21 @@ page_fault (struct intr_frame *f)
           kpage = palloc_get_page(PAL_USER);
         else
           kpage = palloc_get_page(PAL_USER | PAL_ZERO);
-        
+        while(!kpage)
+        {    
+          swap_out();
+          if(find_spte->page_read_bytes > 0)
+            kpage = palloc_get_page(PAL_USER);
+          else
+            kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+        }
+
         if (file_read_at (find_spte->file, kpage, find_spte->page_read_bytes, find_spte->ofs) != (int) find_spte->page_read_bytes)
         {
           palloc_free_page (kpage);
-          lock_release(&swap_lock);
-          exit(-1);
+          exit(-1); //여기서 나감
         }
         memset (kpage + find_spte->page_read_bytes, 0, find_spte->page_zero_bytes);
-        lock_release(&swap_lock);
         
         struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
         if (new_fte == NULL) free_kpage_and_exit(kpage);

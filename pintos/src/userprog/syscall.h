@@ -26,4 +26,6 @@ void seek (int fd, unsigned position);
 unsigned tell (int fd);
 void close (int fd);
 
+void mummap_all(void);
+
 #endif /* userprog/syscall.h */

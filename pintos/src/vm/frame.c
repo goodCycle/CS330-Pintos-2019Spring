@@ -46,7 +46,12 @@ uint8_t
 evict_frame(void *addr)
 {
     swap_out();
-    void* kpage = palloc_get_page(PAL_USER | PAL_ZERO); //need synch? while?!?!?!?!?
+    void* kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+    while(!kpage)
+    {
+        swap_out();
+        kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+    }
     swap_in(addr, kpage);
     return kpage;
 }
@@ -96,7 +101,6 @@ remove_frame(void *kpage)
     }
     lock_acquire(&frame_table_lock);
     list_remove(&fte->elem);
-    // palloc_free_page(fte->frame);
     lock_release(&frame_table_lock);
 
     hash_delete(&fte->owner->spt, &fte->spte->hash_elem);
@@ -116,8 +120,7 @@ frame_free_mapping_with_curr_thread(struct thread *thread)
         struct frame_table_entry *fte = list_entry(e, struct frame_table_entry, elem);
 
         if (fte->owner->tid == thread->tid) {
-        remove_frame(fte->frame);
+            remove_frame(fte->frame);
         }
     }
 }
-

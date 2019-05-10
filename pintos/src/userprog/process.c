@@ -22,7 +22,6 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
-extern struct lock swap_lock;
 extern struct lock file_lock;
 
 /* Starts a new thread running a user program loadedm from
@@ -306,21 +305,6 @@ process_exit (void)
 
   // ummap 과정
   mummap_all();
-
-  // remove_frame을 해주는게 아니라 current_thread가 가지고 있는 mapid를 모두 찾아서 ummap시키는게 맞는듯?
-  // struct hash_iterator i;
-  // struct sup_page_table_entry *spte; 
-  // hash_first (&i, &curr->spt);
-  // struct hash_elem *hash_elem;
-
-  // while (hash_elem) // Remove all the frame related to spte
-  // {
-  //   hash_elem = hash_next(&i);
-  //   spte = hash_entry (hash_cur (&i), struct sup_page_table_entry, hash_elem);
-  //   if (spte->is_in_frame && spte->frame != 0) {
-  //     remove_frame(spte->frame);
-  //   }
-  // }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -704,7 +688,11 @@ setup_stack (char* file_name, char* file_arguments, void **esp)
   {
     swap_out();
     kpage = palloc_get_page(PAL_USER | PAL_ZERO);
-    lock_release(&swap_lock);
+    while(!kpage)
+    {
+        swap_out();
+        kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+    }
 
     success = install_page(((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
     if (success)

@@ -18,8 +18,6 @@ void* valid_pointer(void *ptr);
 
 struct lock file_lock;
 
-extern struct lock swap_lock;
-
 bool need_stack_grow_in_syscall (void *fault_addr)
 {
   if ((thread_current()->user_esp - 32 <= fault_addr) && fault_addr >= 0x90000000){
@@ -197,10 +195,16 @@ void* valid_pointer(void *ptr) {
           kpage = palloc_get_page(PAL_USER);
         else
           kpage = palloc_get_page(PAL_USER | PAL_ZERO);
-        lock_release(&swap_lock);
-
+        while(!kpage)
+        {
+          swap_out();
+          if(find_spte->page_read_bytes > 0)
+            kpage = palloc_get_page(PAL_USER);
+          else
+            kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+        }
         load_file_lazily(kpage, find_spte);
-        
+
         struct frame_table_entry *new_fte = allocate_frame(kpage, find_spte);
         if (new_fte == NULL) free_kpage_and_exit(kpage);
         if (install_page(upage, kpage, find_spte->writable)) {
@@ -583,7 +587,7 @@ void munmap(mapid_t mapid)
 
   if (list_empty(&curr->mfile_list)) return;
 
-  // int find = 0;
+  lock_acquire(&file_lock);
   for (e=list_begin(&curr->mfile_list); e != list_tail(&curr->mfile_list); e = next)
   {
     next = list_next(e);
@@ -603,7 +607,7 @@ void munmap(mapid_t mapid)
         file_write_at(find_spte->file, kpage, find_spte->page_read_bytes, find_spte->ofs);
       }
       // /* Erase fte and spte together */
-      if(find_spte->is_mapped && find_spte->frame != 0)
+      if(find_spte->is_mapped && find_spte->is_in_frame == 1 && find_spte->frame != 0)
         remove_frame(find_spte->frame);
       else
       {
@@ -613,6 +617,7 @@ void munmap(mapid_t mapid)
       free(find_mfile);
     }
   }
+  lock_release(&file_lock);
 }
 
 void mummap_all()
@@ -624,6 +629,8 @@ void mummap_all()
 
   if (list_empty(&curr->mfile_list)) return;
 
+  lock_acquire(&file_lock);
+
   for (e=list_begin(&curr->mfile_list); e != list_tail(&curr->mfile_list); e = next)
   {
     next = list_next(e);
@@ -634,7 +641,6 @@ void mummap_all()
     void *kpage;
     struct sup_page_table_entry *find_spte = spte_find(find_mfile->upage);
 
-    lock_acquire(&file_lock);
     if (pagedir_is_dirty(curr->pagedir, find_spte->user_vaddr)) {
       if (!pagedir_get_page(curr->pagedir, find_spte->user_vaddr))
         kpage = evict_frame(find_mfile->upage);
@@ -644,17 +650,17 @@ void mummap_all()
     }
 
     // /* Erase fte and spte together */
-    if(find_spte->is_mapped && find_spte->frame != 0)
+    if(find_spte->is_mapped && find_spte->is_in_frame == 1 && find_spte->frame != 0)
       remove_frame(find_spte->frame);
     else
     {
       hash_delete(&curr->spt, &find_spte->hash_elem);
       free(find_spte);
     }
-      
     free(find_mfile);
-    lock_release(&file_lock);
   }
+  lock_release(&file_lock);
+
 
   // frame table mapping을 지워주기
   frame_free_mapping_with_curr_thread(curr);

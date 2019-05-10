@@ -53,6 +53,7 @@ swap_init (void)
 bool 
 swap_in (void *addr, void *kpage)
 {   
+    lock_acquire(&swap_lock);
     struct thread *curr = thread_current();
     struct hash_iterator i;
     struct sup_page_table_entry *spte; 
@@ -91,11 +92,12 @@ swap_in (void *addr, void *kpage)
         file_read(spte->file, kpage, spte->page_read_bytes);
         memset (kpage + spte->page_read_bytes, 0, spte->page_zero_bytes);
     }
-    
+
     struct frame_table_entry *fte = allocate_frame(kpage, spte);
     if(!fte){
         palloc_free_page(kpage);
         free(fte);
+        lock_release(&swap_lock);
         return false;
     }
     
@@ -126,11 +128,10 @@ bool
 swap_out (void)
 {
     lock_acquire(&swap_lock);
-    
     struct list_elem *evicted_elem = delete_frame_entry();
     struct frame_table_entry *evicted_fte = list_entry(evicted_elem, struct frame_table_entry, elem);
     struct sup_page_table_entry *evicted_spte = evicted_fte->spte;
-    
+
     if(evicted_spte->is_in_swap)
     {
         size_t bit_index = bitmap_scan(swap_table, 0, 1, 0);
@@ -147,12 +148,12 @@ swap_out (void)
             file_write(evicted_spte->file, evicted_spte->frame, evicted_spte->page_read_bytes);
         }
     }
-    
     evicted_spte->is_in_frame = 0;
 
     pagedir_clear_page(evicted_fte->owner->pagedir, evicted_spte->user_vaddr);
     palloc_free_page(evicted_fte->frame);
     free(evicted_fte); //
+    lock_release(&swap_lock);
     return true;
 }
 
