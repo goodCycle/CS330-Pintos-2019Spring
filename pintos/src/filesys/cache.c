@@ -8,112 +8,148 @@
 #include "filesys/directory.h"
 #include "filesys/cache.h"
 #include "devices/disk.h"
-#include "threads/synch.h"
+#include "threads/malloc.h"
 
-struct list cache_file_list;
-struct lock cache_lock;
-
-void file_cache_init()
+void cache_init()
 {
-    list_init(&cache_file_list);
+    list_init(&cache_entry_list);
     lock_init(&cache_lock);
 }
 
-struct cache_file *find_file_in_cache(disk_sector_t sector)
+struct cache_entry *
+cache_entry_find(disk_sector_t sector)
 {
-    lock_acquire(&cache_lock);
-    int find = 0;
     struct list_elem *next, *e;
-    if(list_size(&cache_file_list) == 0) {
-        lock_release(&cache_lock);
+    if(list_size(&cache_entry_list) == 0) {
         return NULL;
     }
     
-    struct cache_file *c;
-    for(e = list_begin(&cache_file_list); e != list_end(&cache_file_list) ; e = next)
+    struct cache_entry *c;
+    for(e = list_begin(&cache_entry_list); e != list_end(&cache_entry_list) ; e = next)
     {
         next = list_next(e);
-        c = list_entry(e, struct cache_file, elem);
-
-        if(c->sector == sector)
-        {
-            find = 1;
-            break;
+        c = list_entry(e, struct cache_entry, elem);
+        if(c->sector == sector){
+            return c;
         }
     }
-
-    if(find == 0) {
-        lock_release(&cache_lock);
-        return NULL;
-    }
-    lock_release(&cache_lock);
-    return c;
+    return NULL;
 }
 
-struct cache_file* cache_evicted_file(disk_sector_t sector)
+void
+cache_entry_evict()
 {
-    lock_acquire(&cache_lock);
-    struct cache_file *evicted_file = list_entry(list_pop_front(&cache_file_list), struct cache_file, elem);
+    ASSERT (lock_held_by_current_thread(&cache_lock));
 
-    if (evicted_file->dirty)
-    {
-        disk_write (filesys_disk, evicted_file->sector, evicted_file->data);
+    struct cache_entry *evict_entry = list_entry(list_pop_front(&cache_entry_list), struct cache_entry, elem);
+    if (evict_entry->dirty) {
+        cache_entry_back_to_disk(evict_entry);
     }
+    // free(evict_entry);
+    return;
+}
 
-    free(evicted_file);
-    struct cache_file *new_file = malloc(sizeof(struct cache_file));
+struct cache_entry *
+cache_entry_add(disk_sector_t sector)
+{
+    ASSERT (lock_held_by_current_thread(&cache_lock));
+    struct cache_entry *cache_entry = malloc(sizeof(struct cache_entry));
     
-    disk_read(filesys_disk, sector, new_file->data);
-    new_file->sector = sector;
-    new_file->dirty = 0;
+    disk_read(filesys_disk, sector, cache_entry->data);
+    cache_entry->sector = sector;
+    cache_entry->dirty = 0;
 
-    list_push_back(&cache_file_list, &new_file->elem);
-
-    // free(evicted_file);
-    lock_release(&cache_lock);
-    return new_file;
+    list_push_back(&cache_entry_list, &cache_entry->elem);
+    return cache_entry;
 }
 
-struct cache_file* cache_get_file(disk_sector_t sector)
+void
+cache_read_to_buffer (disk_sector_t sector, void* buffer) 
 {
-    struct cache_file *get_file = find_file_in_cache(sector);
     lock_acquire(&cache_lock);
-    if(get_file != NULL) {
-        lock_release(&cache_lock);
-        return get_file;
+    struct cache_entry *cache_entry = cache_entry_find(sector);
+    if (cache_entry != NULL) {
+        printf("____DEBUG_____cache_read_to_buffer find cache_entry %d \n", cache_entry->sector);
     }
-    else if(list_size(&cache_file_list) != MAX_CACHE_SIZE)
+    if (cache_entry == NULL) // no cache entry
     {
-        get_file = malloc(sizeof(struct cache_file));
-        disk_read(filesys_disk, sector, get_file->data);
-        get_file->sector = sector;
-        get_file->dirty = 0;
-        list_push_back(&cache_file_list, &get_file->elem);
-        lock_release(&cache_lock);
-        return get_file;
+        if (list_size(&cache_entry_list) < MAX_CACHE_SIZE) {
+            cache_entry = cache_entry_add(sector);
+        } else {
+            cache_entry_evict();
+            cache_entry = cache_entry_add(sector);
+        }
     }
-    else
-    {
-        lock_release(&cache_lock);
-        get_file = cache_evicted_file(sector);
-        return get_file;
-    }
+    printf("____DEBUG_____cache_read_to_buffer cache_entry sector %d \n", cache_entry->sector);
+    memcpy(buffer, cache_entry->data, DISK_SECTOR_SIZE);
+    lock_release(&cache_lock);
 }
 
+void
+cache_write_from_buffer (disk_sector_t sector, void *buffer)
+{
+    lock_acquire(&cache_lock);
+    struct cache_entry *cache_entry = cache_entry_find(sector);
+    if (cache_entry == NULL) // no cache entry
+    {
+        if (list_size(&cache_entry_list) < MAX_CACHE_SIZE) {
+            cache_entry = cache_entry_add(sector);
+        } else {
+            cache_entry_evict();
+            cache_entry = cache_entry_add(sector);
+        }
+    }
+    memcpy(cache_entry->data, buffer, DISK_SECTOR_SIZE);
+    lock_release(&cache_lock);
+}
 
-void cache_back_to_disk()
+// struct cache_entry* cache_get_file(disk_sector_t sector)
+// {
+//     struct cache_entry *get_file = cache_entry_find(sector);
+//     lock_acquire(&cache_lock);
+//     if(get_file != NULL) {
+//         lock_release(&cache_lock);
+//         return get_file;
+//     }
+//     else if(list_size(&cache_entry_list) != MAX_CACHE_SIZE)
+//     {
+//         get_file = malloc(sizeof(struct cache_entry));
+//         disk_read(filesys_disk, sector, get_file->data);
+//         get_file->sector = sector;
+//         get_file->dirty = 0;
+//         list_push_back(&cache_entry_list, &get_file->elem);
+//         lock_release(&cache_lock);
+//         return get_file;
+//     }
+//     else
+//     {
+//         lock_release(&cache_lock);
+//         get_file = cache_entry_evict(sector);
+//         return get_file;
+//     }
+// }
+
+void cache_entry_back_to_disk(struct cache_entry *cache_entry)
+{
+    ASSERT (lock_held_by_current_thread(&cache_lock));
+    ASSERT (cache_entry != NULL);
+
+    disk_write (filesys_disk, cache_entry->sector, cache_entry->data);
+    cache_entry->dirty = false;
+}
+
+void all_cache_entry_back_to_disk()
 {
     lock_acquire(&cache_lock);
     struct list_elem *e, *next;
-    if(!list_empty(&cache_file_list))
+    if(!list_empty(&cache_entry_list))
     {
-        for(e = list_begin(&cache_file_list); e != list_end(&cache_file_list); e = next)
+        for(e = list_begin(&cache_entry_list); e != list_end(&cache_entry_list); e = next)
         {
             next = list_next(e);
-            struct cache_file *cache_file = list_entry(e, struct cache_file, elem);
-            if(cache_file->dirty)
-            {
-                disk_write (filesys_disk, cache_file->sector, cache_file->data);
+            struct cache_entry *cache_entry = list_entry(e, struct cache_entry, elem);
+            if (cache_entry->dirty) {
+                cache_entry_back_to_disk(cache_entry);
             }
         }
     }

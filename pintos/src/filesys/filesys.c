@@ -25,7 +25,7 @@ filesys_init (bool format)
 
   inode_init ();
   free_map_init ();
-  file_cache_init();
+  cache_init();
 
   if (format) 
     do_format ();
@@ -38,7 +38,7 @@ filesys_init (bool format)
 void
 filesys_done (void) 
 {
-  cache_back_to_disk();
+  all_cache_entry_back_to_disk();
   free_map_close ();
 }
 
@@ -73,10 +73,12 @@ filesys_open (const char *name)
   struct dir *dir = dir_open_root ();
   struct inode *inode = NULL;
 
-  if (dir != NULL)
+  if (dir != NULL) {
+    printf("______DEBUG_______dir lookup start \n");
     dir_lookup (dir, name, &inode);
+  }
   dir_close (dir);
-
+  printf("______DEBUG_______before file_open is inode null? %d \n", inode == NULL);
   return file_open (inode);
 }
 
