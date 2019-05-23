@@ -24,7 +24,7 @@ cache_entry_find(disk_sector_t sector)
         return NULL;
     }
     
-    struct cache_entry *c;
+    struct cache_entry *c = NULL;
     for(e = list_begin(&cache_entry_list); e != list_end(&cache_entry_list) ; e = next)
     {
         next = list_next(e);
@@ -45,7 +45,7 @@ cache_entry_evict()
     if (evict_entry->dirty) {
         cache_entry_back_to_disk(evict_entry);
     }
-    // free(evict_entry);
+    free(evict_entry);
     return;
 }
 
@@ -69,18 +69,20 @@ cache_read_to_buffer (disk_sector_t sector, void* buffer)
     lock_acquire(&cache_lock);
     struct cache_entry *cache_entry = cache_entry_find(sector);
     if (cache_entry != NULL) {
-        printf("____DEBUG_____cache_read_to_buffer find cache_entry %d \n", cache_entry->sector);
+        // printf("____DEBUG_____cache_read_to_buffer find cache_entry %d \n", cache_entry->sector);
     }
     if (cache_entry == NULL) // no cache entry
     {
         if (list_size(&cache_entry_list) < MAX_CACHE_SIZE) {
+            // printf("_____DEBUG_____ just add\n");
             cache_entry = cache_entry_add(sector);
         } else {
+            // printf("_____DEBUG_____ evict!\n");
             cache_entry_evict();
             cache_entry = cache_entry_add(sector);
         }
     }
-    printf("____DEBUG_____cache_read_to_buffer cache_entry sector %d \n", cache_entry->sector);
+    // printf("____DEBUG_____cache_read_to_buffer cache_entry sector %d \n", cache_entry->sector);
     memcpy(buffer, cache_entry->data, DISK_SECTOR_SIZE);
     lock_release(&cache_lock);
 }
@@ -100,6 +102,7 @@ cache_write_from_buffer (disk_sector_t sector, void *buffer)
         }
     }
     memcpy(cache_entry->data, buffer, DISK_SECTOR_SIZE);
+    cache_entry->dirty = 1; //
     lock_release(&cache_lock);
 }
 

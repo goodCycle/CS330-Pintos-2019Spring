@@ -74,11 +74,12 @@ filesys_open (const char *name)
   struct inode *inode = NULL;
 
   if (dir != NULL) {
-    printf("______DEBUG_______dir lookup start \n");
     dir_lookup (dir, name, &inode);
+    // printf("______DEBUG_______dir lookup success \n");
   }
+  // printf("______DEBUG_______before dir_close is inode null? %d \n", inode == NULL);
   dir_close (dir);
-  printf("______DEBUG_______before file_open is inode null? %d \n", inode == NULL);
+  // printf("______DEBUG_______before file_open is inode null? %d \n", inode == NULL);
   return file_open (inode);
 }
 

@@ -114,7 +114,7 @@ fsutil_put (char **argv)
     PANIC ("%s: create failed", file_name);
   dst = filesys_open (file_name);
   if (dst == NULL) {
-    printf("______DEBUG_______file name %s \n", file_name);
+    // printf("______DEBUG_______file name %s \n", file_name);
     PANIC ("%s: open failed", file_name);
   }
 

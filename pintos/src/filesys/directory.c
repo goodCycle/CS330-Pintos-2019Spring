@@ -98,17 +98,22 @@ lookup (const struct dir *dir, const char *name,
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  printf("_____DEBUG_____inode_read_at start \n");
+  // printf("_____DEBUG_____inode_read_at start \n");
   for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
-       ofs += sizeof e) 
+       ofs += sizeof e)
+  {
+    // printf("in for loop!\n\n"); 
     if (e.in_use && !strcmp (name, e.name)) 
       {
+        // printf("name : %s\n");
         if (ep != NULL)
           *ep = e;
         if (ofsp != NULL)
           *ofsp = ofs;
         return true;
       }
+  }
+  // printf("loop out!\n\n");
   return false;
 }
 
@@ -125,13 +130,13 @@ dir_lookup (const struct dir *dir, const char *name,
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  printf("_____DEBUG____lookup start \n");
+  // printf("_____DEBUG____lookup start \n");
   if (lookup (dir, name, &e, NULL)) {
-    printf("_____DEBUG____lookup success \n");
+    // printf("_____DEBUG____lookup success \n");
     *inode = inode_open (e.inode_sector);
   }
   else {
-    printf("_____DEBUG____lookup fail \n");
+    // printf("_____DEBUG____lookup fail \n");
     *inode = NULL;
   }
 
@@ -158,6 +163,7 @@ dir_add (struct dir *dir, const char *name, disk_sector_t inode_sector)
   if (*name == '\0' || strlen (name) > NAME_MAX)
     return false;
 
+  // printf("in dir add \n");
   /* Check that NAME is not in use. */
   if (lookup (dir, name, NULL, NULL))
     goto done;

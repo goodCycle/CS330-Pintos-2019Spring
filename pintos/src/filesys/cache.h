@@ -22,11 +22,11 @@ struct list cache_entry_list;
 struct lock cache_lock;
 
 // struct cache_entry *cache_get_file(disk_sector_t sector);
-void cache_init(void);
+void cache_init();
 struct cache_entry *cache_entry_find(disk_sector_t sector);
-void cache_entry_evict(void);
+void cache_entry_evict();
 struct cache_entry *cache_entry_add(disk_sector_t sector);
 void cache_entry_back_to_disk(struct cache_entry *cache_entry);
-void all_cache_entry_back_to_disk(void);
+void all_cache_entry_back_to_disk();
 void cache_read_to_buffer (disk_sector_t sector, void* buffer);
 void cache_write_from_buffer (disk_sector_t sector, void *buffer);
