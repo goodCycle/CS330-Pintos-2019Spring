@@ -65,7 +65,7 @@ static disk_sector_t
 byte_to_sector (const struct inode *inode, off_t pos) 
 {
   ASSERT (inode != NULL);
-  if (pos < inode->data.length)
+  if (pos >= 0 && pos < inode->data.length)
   {
     if(pos < DIRECT_BLOCK_SIZE * DISK_SECTOR_SIZE)
     {
@@ -107,7 +107,7 @@ inode_init (void)
 bool
 inode_create (disk_sector_t sector, off_t length)
 {
-  printf("____DEBUG____length %d \n", length);
+  // printf("____DEBUG____length %d \n", length);
   struct inode_disk *disk_inode = NULL;
   bool success = false;
   int i = 0;
@@ -126,7 +126,7 @@ inode_create (disk_sector_t sector, off_t length)
       disk_inode->magic = INODE_MAGIC;
       disk_inode->sectors = sectors;
 
-      printf("___DEBUG____ secotr %d, sectors %d \n",  sector, disk_inode->sectors);
+      // printf("___DEBUG____ secotr %d, sectors %d \n",  sector, disk_inode->sectors);
 
       disk_sector_t direct_sectors = (sectors > DIRECT_BLOCK_SIZE) ? DIRECT_BLOCK_SIZE : sectors;
       disk_sector_t indirect_sectors = 0;
@@ -135,13 +135,12 @@ inode_create (disk_sector_t sector, off_t length)
       if (sectors > DIRECT_BLOCK_SIZE)      
         indirect_sectors = (sectors > DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR) ? PTR_NUMBER_PER_SECTOR : sectors - DIRECT_BLOCK_SIZE;
       
-      else if (sectors > DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR)
+      if (sectors > DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR)
         double_indirect_sectors = sectors - DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR;
 
-      cache_write_from_buffer(sector, disk_inode);
       /////////////////////////////////////////////////////////
-      struct cache_entry *cache_entry = cache_entry_find(sector);
-      hex_dump(cache_entry, cache_entry, 512, 0);
+      //struct cache_entry *cache_entry = cache_entry_find(sector);
+      //hex_dump(cache_entry, cache_entry, 512, 0);
       /////////////////////////////////////////////////////////
       if (sectors > 0)
       {
@@ -149,6 +148,7 @@ inode_create (disk_sector_t sector, off_t length)
         {
           if(free_map_allocate (1, &disk_inode->direct_index[i]))
           {
+            // printf("sector number %d \n", disk_inode->direct_index[i]);
             static char zeros[DISK_SECTOR_SIZE];
             cache_write_from_buffer(disk_inode->direct_index[i], zeros);
           }
@@ -158,7 +158,7 @@ inode_create (disk_sector_t sector, off_t length)
       }
       if (sectors > DIRECT_BLOCK_SIZE)
       {
-        disk_inode->indirect_index = malloc(PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t));
+        disk_inode->indirect_index = calloc(1, PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t));
         for(i=0; i<indirect_sectors; i++)
         {
           if(free_map_allocate (1, &disk_inode->indirect_index[i]))
@@ -173,12 +173,13 @@ inode_create (disk_sector_t sector, off_t length)
       if (sectors > DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR)
       {
         // double_indirect_index initialize (2 dim matrix)
-        disk_inode->double_indirect_index = (disk_sector_t **) malloc(PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t *));
+        disk_inode->double_indirect_index = (disk_sector_t **) calloc(1, PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t *));
         for(i=0; i<PTR_NUMBER_PER_SECTOR; i++)
-          disk_inode->double_indirect_index[i] = (disk_sector_t *) malloc(PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t));
+          disk_inode->double_indirect_index[i] = (disk_sector_t *) calloc(1, PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t));
         
         int row = 0;
         int col = 0;
+
         for(i=0; i<double_indirect_sectors; i++)
         {
           row = i/PTR_NUMBER_PER_SECTOR;
@@ -188,11 +189,13 @@ inode_create (disk_sector_t sector, off_t length)
             static char zeros[DISK_SECTOR_SIZE];
             cache_write_from_buffer(disk_inode->double_indirect_index[row][col], zeros);
           }
-          else
+          else {
             return success; // fail 
+          }
         }
       }
       success = true;
+      cache_write_from_buffer(sector, disk_inode);
       free (disk_inode);
 
 
@@ -253,6 +256,9 @@ inode_open (disk_sector_t sector)
   inode->removed = false;
   // disk_read (filesys_disk, inode->sector, &inode->data);
   cache_read_to_buffer(inode->sector, &inode->data);
+  // printf("++++DEBUG+++++\n");
+  // hex_dump(&inode->data, &inode->data, 4, 0);
+  // printf("direct data %d\n", inode->data.direct_index[0]);
   // printf("____DEBUG______after cache read to buffer inode is %08x, sector is %d\n", inode, inode->sector);
   return inode;
 }
@@ -283,15 +289,18 @@ inode_close (struct inode *inode)
   if (inode == NULL)
     return;
 
+  all_cache_entry_back_to_disk();
+
   int i = 0;
   size_t sectors = inode->data.sectors;
   disk_sector_t direct_sectors = (sectors > DIRECT_BLOCK_SIZE) ? DIRECT_BLOCK_SIZE : sectors;
   disk_sector_t indirect_sectors = 0;
   disk_sector_t double_indirect_sectors = 0;
+  struct cache_entry *temp_cache_entry;
 
   if (sectors > DIRECT_BLOCK_SIZE)      
     indirect_sectors = (sectors > DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR) ? PTR_NUMBER_PER_SECTOR : sectors - DIRECT_BLOCK_SIZE;
-  else if (sectors > DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR)
+  if (sectors > DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR)
     double_indirect_sectors = sectors - DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR;
 
   /* Release resources if this was the last opener. */
@@ -349,7 +358,7 @@ off_t
 inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset) 
 {
   // printf("____DEBUG_____ start inode_read_at\n");
-  printf("____DEBUG____initial size : %d, offset : %d, inode_length : %d\n", size, offset, inode->data.length);
+  // printf("____DEBUG____initial size : %d, offset : %d, inode_length : %d\n", size, offset, inode->data.length);
   uint8_t *buffer = buffer_;
   off_t bytes_read = 0;
   uint8_t *bounce = NULL;
@@ -374,7 +383,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       /* Number of bytes to actually copy out of this sector. */
       int chunk_size = size < min_left ? size : min_left;
 
-      printf("===DEBUG=== sector_idx : %d, sector_ofs : %d, inode_left : %d, sector_left : %d, min_left : %d, chunk_size : %d\n", sector_idx, sector_ofs, inode_left, sector_left, min_left, chunk_size);
+      // printf("===DEBUG=== sector_idx : %d, sector_ofs : %d, inode_left : %d, sector_left : %d, min_left : %d, chunk_size : %d\n", sector_idx, sector_ofs, inode_left, sector_left, min_left, chunk_size);
 
       if (chunk_size <= 0)
         break;
@@ -433,9 +442,147 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   const uint8_t *buffer = buffer_;
   off_t bytes_written = 0;
   uint8_t *bounce = NULL;
+  int i;
 
   if (inode->deny_write_cnt)
     return 0;
+
+  size_t add_sectors = bytes_to_sectors(offset + size) - inode->data.sectors;
+
+  size_t add_direct_sectors = 0;
+  size_t add_indirect_sectors = 0;
+  size_t add_double_indirect_sectors = 0;
+
+  if(add_sectors > 0) {
+    // printf("!!!!extense!!!\n");
+  }
+  // {
+  //   if(inode->data.sectors < DIRECT_BLOCK_SIZE)
+  //   {
+  //     // start direct, end direct
+  //     add_direct_sectors = DIRECT_BLOCK_SIZE < add_sectors ? DIRECT_BLOCK_SIZE - inode->data.sectors : add_sectors;
+  //     for(i=0; i<add_direct_sectors; i++)
+  //     {
+  //       if(free_map_allocate (1, &inode->data.direct_index[inode->data.sectors + i]))
+  //       {
+  //         static char zeros[DISK_SECTOR_SIZE];
+  //         cache_write_from_buffer(inode->data.direct_index[inode->data.sectors + i], zeros);
+  //       }
+  //       else
+  //         return 0; // fail
+  //     }
+  //     if(add_sectors > DIRECT_BLOCK_SIZE - inode->data.sectors)
+  //     {
+  //       // start direct, end indirect
+  //       inode->data.indirect_index[i] = (disk_sector_t *) calloc(1, PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t));
+
+  //       add_indirect_sectors = INDIRECT_BLOCK_SIZE < add_sectors - add_direct_sectors ? INDIRECT_BLOCK_SIZE : add_sectors - add_direct_sectors;
+  //       for(i=0; i<add_indirect_sectors; i++)
+  //       {
+  //         if(free_map_allocate (1, &inode->data.indirect_index[i]))
+  //         {
+  //           static char zeros[DISK_SECTOR_SIZE];
+  //           cache_write_from_buffer(inode->data.indirect_index[i], zeros);
+  //         }
+  //         else
+  //           return 0; // fail
+  //       }
+  //       if(add_sectors > DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR - inode->data.sectors)
+  //       {
+  //         // start direct, end double
+  //         inode->data.double_indirect_index = (disk_sector_t **) calloc(1, PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t *));
+  //         for(i=0; i<PTR_NUMBER_PER_SECTOR; i++)
+  //           inode->data.double_indirect_index[i] = (disk_sector_t *) calloc(1, PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t));
+
+  //         add_double_indirect_sectors = add_sectors - DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR - inode->data.sectors;
+          
+  //         int row = 0;
+  //         int col = 0;
+  //         for(i=0; i<add_double_indirect_sectors; i++)
+  //         {
+  //           row = i/PTR_NUMBER_PER_SECTOR;
+  //           col = i%PTR_NUMBER_PER_SECTOR;
+  //           if(free_map_allocate (1, &inode->data.double_indirect_index[row][col]))
+  //           {
+  //             static char zeros[DISK_SECTOR_SIZE];
+  //             cache_write_from_buffer(inode->data.double_indirect_index[row][col], zeros);
+  //           }
+  //           else
+  //             return 0; // fail 
+  //         }
+  //       }
+  //     }
+  //   }
+  //   else if(inode->data.sectors < DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR)
+  //   {
+  //     // start indirect, end indirect
+  //     inode->data.indirect_index[i] = (disk_sector_t *) calloc(1, PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t));
+
+  //     add_indirect_sectors = DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR - inode->data.sectors < add_sectors ? DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR - inode->data.sectors : add_sectors;
+  //     for(i=0; i<add_indirect_sectors; i++)
+  //     {
+  //       if(free_map_allocate (1, &inode->data.indirect_index[i]))
+  //       {
+  //         static char zeros[DISK_SECTOR_SIZE];
+  //         cache_write_from_buffer(inode->data.indirect_index[i], zeros);
+  //       }
+  //       else
+  //         return 0; // fail
+  //     }
+  //     if(DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR - inode->data.sectors < add_sectors)
+  //     {
+  //       // start indirect, end double
+  //       inode->data.double_indirect_index = (disk_sector_t **) calloc(1, PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t *));
+  //       for(i=0; i<PTR_NUMBER_PER_SECTOR; i++)
+  //         inode->data.double_indirect_index[i] = (disk_sector_t *) calloc(1, PTR_NUMBER_PER_SECTOR * sizeof(disk_sector_t));
+
+  //       add_double_indirect_sectors = add_sectors - DIRECT_BLOCK_SIZE + PTR_NUMBER_PER_SECTOR - inode->data.sectors;
+        
+  //       int row = 0;
+  //       int col = 0;
+  //       for(i=0; i<add_double_indirect_sectors; i++)
+  //       {
+  //         row = i/PTR_NUMBER_PER_SECTOR;
+  //         col = i%PTR_NUMBER_PER_SECTOR;
+  //         if(free_map_allocate (1, &inode->data.double_indirect_index[row][col]))
+  //         {
+  //           static char zeros[DISK_SECTOR_SIZE];
+  //           cache_write_from_buffer(inode->data.double_indirect_index[row][col], zeros);
+  //         }
+  //         else
+  //           return 0; // fail 
+  //       }
+  //     }
+  //   }
+  //   else
+  //   {
+  //     add_double_indirect_sectors = add_sectors;
+      
+  //     int row = 0;
+  //     int col = 0;
+  //     for(i=0; i<add_double_indirect_sectors; i++)
+  //     {
+  //       row = i/PTR_NUMBER_PER_SECTOR;
+  //       col = i%PTR_NUMBER_PER_SECTOR;
+  //       if(free_map_allocate (1, &inode->data.double_indirect_index[row][col]))
+  //       {
+  //         static char zeros[DISK_SECTOR_SIZE];
+  //         cache_write_from_buffer(inode->data.double_indirect_index[row][col], zeros);
+  //       }
+  //       else
+  //         return 0; // fail 
+  //     }
+  //   }
+  //   inode->data.sectors += add_sectors;
+  //   inode->data.length = offset + size;
+  // }
+
+
+  // // printf("offset + size %d, inode length %d, add_sectors %d\n", offset+size, inode->data.length, add_sectors);
+  // if(offset + size > inode->data.length && add_sectors <= 0)
+  // {
+  //   inode->data.length = offset + size;
+  // }
 
   while (size > 0) 
     {

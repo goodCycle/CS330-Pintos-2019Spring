@@ -53,9 +53,14 @@ void
 free_map_open (void) 
 {
   free_map_file = file_open (inode_open (FREE_MAP_SECTOR));
+  //////////////////////////
+  // struct file *test_file = free_map_file;
+  // struct inode *test_inode = file_get_inode(test_file);
+  // printf("__DEBUG___ free map file size %d \n", inode_length(test_inode));
+  //////////////////////////
   if (free_map_file == NULL)
     PANIC ("can't open free map");
-  if (!bitmap_read (free_map, free_map_file))
+  if (!bitmap_read (free_map, free_map_file)) 
     PANIC ("can't read free map");
 }
 

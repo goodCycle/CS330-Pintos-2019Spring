@@ -90,6 +90,9 @@ cache_read_to_buffer (disk_sector_t sector, void* buffer)
 void
 cache_write_from_buffer (disk_sector_t sector, void *buffer)
 {
+    // printf("___DEBUG____cache write from buffer %d \n", sector);
+    // hex_dump(buffer, buffer, 4, 0);
+
     lock_acquire(&cache_lock);
     struct cache_entry *cache_entry = cache_entry_find(sector);
     if (cache_entry == NULL) // no cache entry
@@ -101,6 +104,7 @@ cache_write_from_buffer (disk_sector_t sector, void *buffer)
             cache_entry = cache_entry_add(sector);
         }
     }
+
     memcpy(cache_entry->data, buffer, DISK_SECTOR_SIZE);
     cache_entry->dirty = 1; //
     lock_release(&cache_lock);
