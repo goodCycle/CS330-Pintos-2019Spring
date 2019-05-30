@@ -261,6 +261,9 @@ inode_open (disk_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  inode->isdir = 0;
+  // printf("here?!\n");
+
   // disk_read (filesys_disk, inode->sector, &inode->data);
   cache_read_to_buffer(inode->sector, &inode->data);
   // printf("++++DEBUG+++++\n");
@@ -277,6 +280,26 @@ inode_reopen (struct inode *inode)
   if (inode != NULL)
     inode->open_cnt++;
   return inode;
+}
+
+struct inode *
+inode_get(disk_sector_t sector)
+{
+  struct list_elem *e;
+  struct inode *inode;
+
+  /* Check whether this inode is already open. */
+  for (e = list_begin (&open_inodes); e != list_end (&open_inodes);
+       e = list_next (e)) 
+    {
+      inode = list_entry (e, struct inode, elem);
+      if (inode->sector == sector) 
+        {
+          return inode; 
+        }
+    }
+
+  return NULL;
 }
 
 /* Returns INODE's inode number. */
@@ -687,4 +710,25 @@ off_t
 inode_length (const struct inode *inode)
 {
   return inode->data.length;
+}
+
+
+disk_sector_t
+inode_parent (const struct inode *inode)
+{
+  return inode->parent;
+}
+
+
+bool
+inode_isdir (const struct inode *inode)
+{
+  return inode->isdir;
+}
+
+
+int
+inode_open_cnt(const struct inode *inode)
+{
+  return inode->open_cnt;
 }

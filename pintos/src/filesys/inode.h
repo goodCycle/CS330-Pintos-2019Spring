@@ -46,13 +46,13 @@ struct inode
     //
     bool isdir;
     disk_sector_t parent;
-  
   };
 
 void inode_init (void);
 bool inode_create (disk_sector_t, off_t);
 struct inode *inode_open (disk_sector_t);
 struct inode *inode_reopen (struct inode *);
+struct inode *inode_get (disk_sector_t);
 disk_sector_t inode_get_inumber (const struct inode *);
 void inode_close (struct inode *);
 void inode_remove (struct inode *);
@@ -61,5 +61,8 @@ off_t inode_write_at (struct inode *, const void *, off_t size, off_t offset);
 void inode_deny_write (struct inode *);
 void inode_allow_write (struct inode *);
 off_t inode_length (const struct inode *);
+disk_sector_t inode_parent (const struct inode *);
+bool inode_isdir (const struct inode *);
+int inode_open_cnt(const struct inode *);
 
 #endif /* filesys/inode.h */

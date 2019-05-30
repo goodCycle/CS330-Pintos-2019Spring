@@ -13,6 +13,8 @@
 #include "threads/palloc.h"
 #include "filesys/inode.h"
 #include "filesys/filesys.h"
+#include "filesys/directory.h"
+#include "filesys/file.h"
 
 static void syscall_handler (struct intr_frame *);
 int sys_write(int fd, const void *buffer, unsigned size);
@@ -151,6 +153,25 @@ syscall_handler (struct intr_frame *f UNUSED)
       int *valid_dir_addr = (int *)valid_pointer((void *)(f->esp+4)); 
       int *valid_dir = (int *)valid_pointer((void *)*valid_dir_addr);
       f->eax = mkdir((const char*)*valid_dir_addr);
+      break;
+    }
+    case SYS_CHDIR:
+    {
+      int *valid_dir_addr = (int *)valid_pointer((void *)(f->esp+4)); 
+      int *valid_dir = (int *)valid_pointer((void *)*valid_dir_addr);
+      f->eax = chdir((const char*)*valid_dir_addr);
+      break;
+    }
+    case SYS_ISDIR:
+    {
+      int *valid_fd = (int*)valid_pointer((void*)(f->esp+4));
+      f->eax = isdir(*valid_fd);
+      break;
+    }
+    case SYS_INUMBER:
+    {
+      int *valid_fd = (int*)valid_pointer((void*)(f->esp+4));
+      f->eax = inumber(*valid_fd);
       break;
     }
   }
@@ -383,6 +404,7 @@ int read (int fd, void *buffer, unsigned size)
 int write (int fd, const void *buffer, unsigned length)
 {
   int i;
+  int num_write = -1;
   for(i=1;i<length/4096 + 1;i++)
     valid_pointer((void *)(buffer + i * 4096));
 
@@ -413,8 +435,12 @@ int write (int fd, const void *buffer, unsigned length)
     return -1;
   }
 
-  int num_write = file_write(fd_info->file, buffer, length);
-
+  if(!inode_isdir(file_get_inode(fd_info->file)))
+  {
+    // printf("inode is dir %d\n", inode_isdir(file_get_inode(fd_info->file)));
+    num_write = file_write(fd_info->file, buffer, length);
+  }
+    
   lock_release(&file_lock);
 
   return num_write;
@@ -688,15 +714,22 @@ bool mkdir(const char *dir)
   lock_acquire (&file_lock);
 
   return_value = filesys_create(dir, 0);
+  
   struct dir *file_dir = get_dir(dir);
   char *name = get_name(dir);
   struct inode *inode;
   if (!dir_lookup(file_dir, name, &inode)) {
+    dir_close(file_dir);
     return false;
   }
-  inode->isdir = true;
+  inode->isdir = 1;
+  // printf("inode open count %d\n", inode->open_cnt);
+  // inode_close(inode); // for dir_lookup  <<<<<<<<<<<<<<<<<<<<<<<<< 생각해보기
   lock_release (&file_lock);
+  
+  // printf("dir open cnt %d\n", inode_open_cnt(dir_get_inode(file_dir)));
 
+  dir_close(file_dir); // for get_dir
   free(name);
   return return_value;
 }
@@ -704,7 +737,101 @@ bool mkdir(const char *dir)
 bool chdir(const char *dir)
 {
   lock_acquire(&file_lock);
+
   struct dir *file_dir = get_dir(dir);
-  char *file = get_name(dir);
+  struct dir *final_dir;
+  char *name = get_name(dir);
+  struct inode *inode;
+
+  if(strcmp(name, ".") == 0)
+  {
+    dir_close(thread_current()->cur_dir);
+    dir_open(dir_get_inode(file_dir));
+    thread_current()->cur_dir = dir;
+  }
+  else if(strcmp(name, "..") == 0)
+  {
+    final_dir = dir_open(inode_open(inode_parent(dir_get_inode(file_dir))));
+    dir_close(thread_current()->cur_dir);
+    thread_current()->cur_dir = final_dir;
+  }
+  else
+  {
+    // printf("chdir %08x\n", file_dir);
+    // printf("here\n");
+    if(!dir_lookup(file_dir, name, &inode))
+    {
+      lock_release(&file_lock);
+      return false;
+    }
+    final_dir = dir_open(inode);
+    dir_close(thread_current()->cur_dir);
+    thread_current()->cur_dir = final_dir;
+    // printf("inode %08x \n", dir_get_inode(final_dir));
+  }
+
+  // printf("chdir %08x\n", file_dir);
+  dir_close(file_dir);
   lock_release(&file_lock);
+  return true;
+}
+
+bool isdir (int fd)
+{
+  lock_acquire(&file_lock);
+  bool return_value;
+  struct thread *curr = thread_current();
+  struct list_elem *e, *next;
+  if (list_empty(&curr->fd_list)) {
+    lock_release(&file_lock);
+    return -1;
+  }
+  struct file_info *fd_info;
+  int find = 0;
+  for (e=list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = next) {
+    next = list_next(e);
+    fd_info = list_entry(e, struct file_info, elem);
+    if (fd_info->fd == fd) {
+      find = 1;
+      break;
+    }
+  }
+  if (find == 0) {
+    lock_release(&file_lock);
+    return -1;
+  }
+
+  return_value = inode_isdir(file_get_inode(fd_info->file));
+  lock_release(&file_lock);
+  return return_value;
+}
+
+int inumber (int fd)
+{
+  lock_acquire(&file_lock);
+  bool return_value;
+  struct thread *curr = thread_current();
+  struct list_elem *e, *next;
+  if (list_empty(&curr->fd_list)) {
+    lock_release(&file_lock);
+    return -1;
+  }
+  struct file_info *fd_info;
+  int find = 0;
+  for (e=list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = next) {
+    next = list_next(e);
+    fd_info = list_entry(e, struct file_info, elem);
+    if (fd_info->fd == fd) {
+      find = 1;
+      break;
+    }
+  }
+  if (find == 0) {
+    lock_release(&file_lock);
+    return -1;
+  }
+
+  return_value = inode_get_inumber(file_get_inode(fd_info->file));
+  lock_release(&file_lock);
+  return return_value;
 }
