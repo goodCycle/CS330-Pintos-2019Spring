@@ -27,5 +27,7 @@ unsigned tell (int fd);
 void close (int fd);
 
 void mummap_all(void);
+bool mkdir(const char *dir);
+bool chdir(const char *dir);
 
 #endif /* userprog/syscall.h */

@@ -116,6 +116,9 @@ start_process (void *f_name)
   // 
   if (success) {
     thread_current()->load_check = 1;
+    if (thread_current()->cur_dir == NULL) {
+      thread_current()->cur_dir = dir_open_root();
+    }
   } else {
     thread_current()->load_check = 0;
   }

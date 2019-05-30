@@ -8,6 +8,7 @@
 //
 #include "threads/synch.h"
 #include "hash.h"
+#include "filesys/directory.h"
 
 typedef int mapid_t;
 
@@ -142,6 +143,9 @@ struct thread
 
     struct list mfile_list;
     mapid_t mapid;
+
+    // project4
+    struct dir *cur_dir;
   };
 
 /* If false (default), use round-robin scheduler.

@@ -5,6 +5,7 @@
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
 #include "threads/malloc.h"
+#include "threads/thread.h"
 
 /* A directory. */
 struct dir 
@@ -245,4 +246,112 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
         } 
     }
   return false;
+}
+
+
+struct dir *
+get_dir(char *path)
+{
+  char *name;
+  char *ptr, *ret;
+  struct dir *dir;
+  struct inode *inode;
+  disk_sector_t parent;
+
+  name = malloc((NAME_MAX+1)*sizeof(char));
+  strlcpy(name, path, NAME_MAX+1);
+  ptr = strrchr(name, "/");
+
+  if(ptr == NULL && !thread_current()->cur_dir) { // input path : abc, ., ..
+    return dir_open_root();
+  }
+  else if(ptr == NULL)
+  {
+    if(strcmp(name, "..") == 0) // input path : ..
+    {
+      parent = thread_current()->cur_dir->inode->parent;
+      return dir_open(inode_open(parent));
+    }
+    else // input path : abc, .
+    {
+      return dir_reopen(thread_current()->cur_dir);
+    }
+  }
+
+  ptr = strchr(name, "/"); 
+  if(ptr == 0) // input path : /abc, /123/abc
+  {
+    dir = dir_open_root();
+    name += 1;
+    ptr = strchr(name, "/");
+    if(ptr == NULL)
+    {
+      return dir;
+    }
+  }
+  else // input path : abc/def
+  {
+    dir = dir_reopen(thread_current()->cur_dir);
+  }
+
+  while(ptr)
+  { //
+    *ptr = '\0';
+    if(strcmp(name, ".") == 0)
+    {
+      name = ptr + 1;
+      ptr = strchr(name, "/");
+      continue;
+    }
+    if(strcmp(name, "..") == 0)
+    {
+      parent = thread_current()->cur_dir->inode->parent;
+      dir_close(dir);
+      dir = dir_open(inode_open(parent));
+      name = ptr + 1;
+      ptr = strchr(name, "/");
+      continue;
+    }
+
+    if(!dir_lookup(dir, name, &inode))
+      return NULL;
+
+    if(inode->isdir)
+    {
+      dir_close(dir);
+      dir = dir_open(inode);
+    }
+    else
+      inode_close(inode);
+    
+    //
+    name = ptr + 1;
+    ptr = strchr(name, "/");
+  }
+
+  free(name);
+  return dir;
+}
+
+char *
+get_name(char *path)
+{
+  int path_len = strlen(path);
+  char name[path_len+1];
+  char *ptr, *ret;
+
+  strlcpy(name, path, path_len+1);
+  ptr = strrchr(name, "/");
+
+  if (ptr == NULL) {
+    ret = malloc(strlen(path)+1);
+    strlcpy(ret, path, strlen(path)+1);
+    return ret;
+  }
+
+  ptr += 1;
+
+  ret = malloc(strlen(ptr) * sizeof(char) + 1);
+  strlcpy(ret, ptr, strlen(ptr)+1);
+  return ret;
 }
