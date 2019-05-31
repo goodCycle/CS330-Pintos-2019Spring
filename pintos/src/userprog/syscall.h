@@ -29,5 +29,8 @@ void close (int fd);
 void mummap_all(void);
 bool mkdir(const char *dir);
 bool chdir(const char *dir);
+bool readdir(int fd, char *name);
+bool isdir (int fd);
+int inumber(int fd);
 
 #endif /* userprog/syscall.h */

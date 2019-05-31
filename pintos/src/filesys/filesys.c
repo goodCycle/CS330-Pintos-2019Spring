@@ -53,16 +53,31 @@ filesys_create (const char *name, off_t initial_size)
   disk_sector_t inode_sector = 0;
   struct dir *dir = get_dir(name);
   char *file_name = get_name(name);
+  char *check_memory;
+  // printf("name is %s\n", name);
+  // printf("dir sector %d, file_name %s, inode is %08x\n", inode_get_inumber(dir_get_inode(dir)), file_name, dir_get_inode(dir));
+  // printf("inode %08x\n", dir_get_inode(dir));
+  // printf("name %s\n", file_name);
 
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
                   && inode_create (inode_sector, initial_size)
+                  && ((check_memory = malloc(8*1024)) != NULL)
                   && dir_add (dir, file_name, inode_sector));
-  if (!success && inode_sector != 0) 
+  if (!success && inode_sector != 0)
     free_map_release (inode_sector, 1);
-  dir_close (dir);
+  
+  // printf("dir open cnt %d\n", inode_open_cnt(dir_get_inode(dir)));
 
+  dir_close (dir);
   free(file_name);
+
+  if(check_memory != NULL)
+    free(check_memory);
+
+  if(success)
+    printf("name is %s\n", name);
+
   return success;
 }
 
@@ -76,12 +91,49 @@ filesys_open (const char *name)
 {
   struct dir *dir = get_dir(name);
   char *file_name = get_name(name);
-
   struct inode *inode = NULL;
 
-  if (dir != NULL) {
-    dir_lookup (dir, file_name, &inode);
+  // printf("here?\n");
+  // printf("dir %08x, file_name %s\n", dir, file_name);
+
+  // printf("IN FILESYS OPEN\n");
+  // printf("dir sector %d, file_name %s\n", inode_get_inumber(dir_get_inode(dir)), file_name);
+  // printf("1. inode %08x\n", dir_get_inode(dir));
+  
+  if (strlen(name) == 0 || (dir == NULL && file_name == NULL)) {
+    return NULL;
   }
+
+  if (dir != NULL)
+  {
+    if(inode_get_inumber(dir_get_inode(dir)) == 1 && strcmp(file_name, "") == 0) // root
+    {
+      dir_close (dir);
+      return file_open(inode_open(ROOT_DIR_SECTOR));
+    }
+
+    if(strcmp(file_name, ".") == 0)
+    {
+      inode = dir_get_inode(dir);
+    }
+    else if(strcmp(file_name, "..") == 0)
+    {
+      // inode = inode_open(inode_parent(dir_get_inode(dir)));
+    }
+    else
+    { 
+      // printf("lookup?!?!\n");
+      if(!dir_lookup (dir, file_name, &inode))
+      {
+        // printf("lookup fail!\n");
+        dir_close (dir);
+        free(file_name);
+        return NULL;
+      }
+    }
+  }  
+
+  // printf("inode %08x, inode is dir? %d, sector %d\n", inode, inode_isdir(inode), inode_get_inumber(inode));
 
   dir_close (dir);
   free(file_name);
@@ -95,8 +147,19 @@ filesys_open (const char *name)
 bool
 filesys_remove (const char *name) 
 {
+  printf("name is %s\n", name);
+
   struct dir *dir = get_dir(name);
   char *file_name = get_name(name);
+
+  // printf("dir %08x, file name %s\n", dir, file_name);
+
+  if(dir != NULL && inode_get_inumber(dir_get_inode(dir)) == 1 && strlen(file_name) == 0) // remove root
+  {
+    // printf("filesysremove!! \n");
+    dir_close (dir); 
+    return false;
+  }
 
   bool success = dir != NULL && dir_remove (dir, file_name);
   dir_close (dir); 
