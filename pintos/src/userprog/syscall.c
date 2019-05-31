@@ -13,6 +13,8 @@
 #include "threads/palloc.h"
 #include "filesys/inode.h"
 #include "filesys/filesys.h"
+#include "filesys/directory.h"
+#include "filesys/file.h"
 
 #define READDIR_MAX_LEN 14
 
@@ -322,6 +324,8 @@ int open (const char *file)
   struct file *new_file = filesys_open(file);
   lock_release(&file_lock);
 
+  // printf("after open!\n");
+
   if (new_file == NULL) {
     return -1;
   }
@@ -412,6 +416,7 @@ int read (int fd, void *buffer, unsigned size)
 int write (int fd, const void *buffer, unsigned length)
 {
   int i;
+  int num_write = -1;
   for(i=1;i<length/4096 + 1;i++)
     valid_pointer((void *)(buffer + i * 4096));
 
@@ -442,8 +447,12 @@ int write (int fd, const void *buffer, unsigned length)
     return -1;
   }
 
-  int num_write = file_write(fd_info->file, buffer, length);
-
+  if(!inode_isdir(file_get_inode(fd_info->file)))
+  {
+    // printf("inode is dir %d\n", inode_isdir(file_get_inode(fd_info->file)));
+    num_write = file_write(fd_info->file, buffer, length);
+  }
+    
   lock_release(&file_lock);
 
   return num_write;
@@ -717,15 +726,25 @@ bool mkdir(const char *dir)
   lock_acquire (&file_lock);
 
   return_value = filesys_create(dir, 0);
+  
   struct dir *file_dir = get_dir(dir);
   char *name = get_name(dir);
   struct inode *inode;
   if (!dir_lookup(file_dir, name, &inode)) {
+    dir_close(file_dir);
     return false;
   }
-  inode->isdir = true;
+  inode->isdir = 1;
+  inode->parent = inode_get_inumber(dir_get_inode(file_dir));
+  inode->path = dir;
+  // printf("child's parent sector is %zu\n", inode->parent);
+  // printf("inode open count %d\n", inode->open_cnt);
+  // inode_close(inode); // for dir_lookup  <<<<<<<<<<<<<<<<<<<<<<<<< 생각해보기
   lock_release (&file_lock);
+  
+  // printf("dir open cnt %d\n", inode_open_cnt(dir_get_inode(file_dir)));
 
+  dir_close(file_dir); // for get_dir
   free(name);
   return return_value;
 }
@@ -733,8 +752,46 @@ bool mkdir(const char *dir)
 bool chdir(const char *dir)
 {
   lock_acquire(&file_lock);
+
   struct dir *file_dir = get_dir(dir);
-  char *file = get_name(dir);
+  struct dir *final_dir;
+  char *name = get_name(dir);
+  struct inode *inode;
+
+  // printf("dir sector : %zu\n", inode_get_inumber(dir_get_inode(file_dir)));
+
+  if(inode_get_inumber(dir_get_inode(file_dir)) == 1 && strlen(name) == 0) //root
+  {
+    dir_close(thread_current()->cur_dir);
+    final_dir = dir_open(dir_get_inode(file_dir));
+    thread_current()->cur_dir = final_dir;
+  }
+  else if(strcmp(name, ".") == 0)
+  {
+    dir_close(thread_current()->cur_dir);
+    dir_open(dir_get_inode(file_dir));
+    thread_current()->cur_dir = dir;
+  }
+  else if(strcmp(name, "..") == 0)
+  {
+    // final_dir = dir_open(inode_open(inode_parent(dir_get_inode(file_dir))));
+    final_dir = dir_reopen(file_dir);
+    dir_close(thread_current()->cur_dir);
+    thread_current()->cur_dir = final_dir;
+  }
+  else
+  {
+    if(!dir_lookup(file_dir, name, &inode))
+    {
+      lock_release(&file_lock);
+      return false;
+    }
+    final_dir = dir_open(inode);
+    dir_close(thread_current()->cur_dir);
+    thread_current()->cur_dir = final_dir;
+  }
+
+  dir_close(file_dir);
   lock_release(&file_lock);
   return true;
 }
@@ -772,7 +829,7 @@ bool isdir (int fd)
 int inumber (int fd)
 {
   lock_acquire(&file_lock);
-  bool return_value;
+  int return_value;
   struct thread *curr = thread_current();
   struct list_elem *e, *next;
   if (list_empty(&curr->fd_list)) {
@@ -793,6 +850,8 @@ int inumber (int fd)
     lock_release(&file_lock);
     return -1;
   }
+
+  // printf("fd is %d, fd_info->file %08x, inode %08x, inumber %d\n",fd, fd_info->file, file_get_inode(fd_info->file), inode_get_inumber(file_get_inode(fd_info->file)));
 
   return_value = inode_get_inumber(file_get_inode(fd_info->file));
   lock_release(&file_lock);
@@ -831,9 +890,12 @@ readdir (int fd, char name[READDIR_MAX_LEN + 1])
     return false;
   }
 
-  struct dir *open_dir = dir_open(inode);
-  return_value = dir_readdir (open_dir, name);
-  dir_close(open_dir);
+  // struct dir *open_dir = dir_open(inode);
+  // return_value = dir_readdir (open_dir, name);
+  // dir_close(open_dir);
+  struct dir *open_dir = (struct dir*)fd_info->file;
+  return_value = dir_readdir(open_dir, name);
+
   lock_release(&file_lock);
   return return_value;
 }

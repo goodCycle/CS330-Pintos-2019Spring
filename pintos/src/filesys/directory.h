@@ -29,4 +29,6 @@ bool dir_readdir (struct dir *, char name[NAME_MAX + 1]);
 
 struct dir *get_dir(char *path);
 char *get_name(char *path);
+bool is_dir_empty(struct inode *inode);
+char *string_pre_processing(char * path);
 #endif /* filesys/directory.h */

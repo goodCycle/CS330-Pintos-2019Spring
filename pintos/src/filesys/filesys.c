@@ -75,8 +75,8 @@ filesys_create (const char *name, off_t initial_size)
   if(check_memory != NULL)
     free(check_memory);
 
-  if(success)
-    printf("name is %s\n", name);
+  // if(success)
+  //   printf("name is %s\n", name);
 
   return success;
 }
@@ -147,7 +147,7 @@ filesys_open (const char *name)
 bool
 filesys_remove (const char *name) 
 {
-  printf("name is %s\n", name);
+  // printf("name is %s\n", name);
 
   struct dir *dir = get_dir(name);
   char *file_name = get_name(name);
@@ -165,6 +165,8 @@ filesys_remove (const char *name)
   dir_close (dir); 
 
   free(file_name);
+  // printf("remove success!\n");
+
   return success;
 }
 

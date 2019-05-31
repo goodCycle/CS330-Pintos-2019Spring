@@ -243,7 +243,7 @@ inode_open (disk_sector_t sector)
       if (inode->sector == sector) 
         {
           inode_reopen (inode);
-          // printf("____DEBUG______after inode reopen, inode is %08x \n", inode);
+          // printf("____DEBUG______after inode reopen, inode is %08x sector is %d\n", inode, sector);
           return inode; 
         }
     }
@@ -261,6 +261,9 @@ inode_open (disk_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  inode->isdir = 0;
+  // printf("here?!\n");
+
   // disk_read (filesys_disk, inode->sector, &inode->data);
   cache_read_to_buffer(inode->sector, &inode->data);
   // printf("++++DEBUG+++++\n");
@@ -277,6 +280,26 @@ inode_reopen (struct inode *inode)
   if (inode != NULL)
     inode->open_cnt++;
   return inode;
+}
+
+struct inode *
+inode_get(disk_sector_t sector)
+{
+  struct list_elem *e;
+  struct inode *inode;
+
+  /* Check whether this inode is already open. */
+  for (e = list_begin (&open_inodes); e != list_end (&open_inodes);
+       e = list_next (e)) 
+    {
+      inode = list_entry (e, struct inode, elem);
+      if (inode->sector == sector) 
+        {
+          return inode; 
+        }
+    }
+
+  return NULL;
 }
 
 /* Returns INODE's inode number. */
@@ -347,13 +370,13 @@ inode_close (struct inode *inode)
             free(inode->data.double_indirect_index);
           }
           // free_map_release (inode->data.start, bytes_to_sectors (inode->data.length)); 
+          free (inode);
         }
       else
       {
         // remove 하지 않는데 close하는 경우
         cache_write_from_buffer(inode->sector, &inode->data);
-      }
-      free (inode); 
+      } 
     }
   all_cache_entry_back_to_disk();
 }
@@ -687,4 +710,25 @@ off_t
 inode_length (const struct inode *inode)
 {
   return inode->data.length;
+}
+
+
+disk_sector_t
+inode_parent (const struct inode *inode)
+{
+  return inode->parent;
+}
+
+
+bool
+inode_isdir (const struct inode *inode)
+{
+  return inode->isdir;
+}
+
+
+int
+inode_open_cnt(const struct inode *inode)
+{
+  return inode->open_cnt;
 }
