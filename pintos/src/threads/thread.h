@@ -8,7 +8,6 @@
 //
 #include "threads/synch.h"
 #include "hash.h"
-#include "filesys/directory.h"
 
 typedef int mapid_t;
 
