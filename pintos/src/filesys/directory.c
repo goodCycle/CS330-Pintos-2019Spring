@@ -5,12 +5,14 @@
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
 #include "threads/malloc.h"
+#include "threads/thread.h"
 
 /* A directory. */
 struct dir 
   {
     struct inode *inode;                /* Backing store. */
     off_t pos;                          /* Current position. */
+    bool unused;
   };
 
 /* A single directory entry. */
@@ -98,16 +100,22 @@ lookup (const struct dir *dir, const char *name,
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
+  // printf("_____DEBUG_____inode_read_at start \n");
   for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
-       ofs += sizeof e) 
+       ofs += sizeof e)
+  {
+    // printf("in for loop!\n\n"); 
     if (e.in_use && !strcmp (name, e.name)) 
       {
+        // printf("name : %s\n");
         if (ep != NULL)
           *ep = e;
         if (ofsp != NULL)
           *ofsp = ofs;
         return true;
       }
+  }
+  // printf("loop out!\n\n");
   return false;
 }
 
@@ -124,10 +132,18 @@ dir_lookup (const struct dir *dir, const char *name,
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  if (lookup (dir, name, &e, NULL))
+  // printf("_____DEBUG____lookup start \n");
+  if (lookup (dir, name, &e, NULL)) {
+    // printf("_____DEBUG____lookup success \n");
     *inode = inode_open (e.inode_sector);
-  else
+    if(*inode != NULL)
+      (*inode)->path = name;
+  }
+  else 
+  {
+    // printf("_____DEBUG____lookup fail \n");
     *inode = NULL;
+  }
 
   return *inode != NULL;
 }
@@ -152,6 +168,7 @@ dir_add (struct dir *dir, const char *name, disk_sector_t inode_sector)
   if (*name == '\0' || strlen (name) > NAME_MAX)
     return false;
 
+  // printf("in dir add \n");
   /* Check that NAME is not in use. */
   if (lookup (dir, name, NULL, NULL))
     goto done;
@@ -172,8 +189,12 @@ dir_add (struct dir *dir, const char *name, disk_sector_t inode_sector)
   e.in_use = true;
   strlcpy (e.name, name, sizeof e.name);
   e.inode_sector = inode_sector;
+  // struct inode *child_inode;
+  // child_inode = inode_open(inode_sector);
+  // child_inode->parent = dir->inode->sector;
   success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
-
+  // inode_close(child_inode);
+  
  done:
   return success;
 }
@@ -184,6 +205,7 @@ dir_add (struct dir *dir, const char *name, disk_sector_t inode_sector)
 bool
 dir_remove (struct dir *dir, const char *name) 
 {
+  // printf("IN DIR\n");
   struct dir_entry e;
   struct inode *inode = NULL;
   bool success = false;
@@ -192,25 +214,52 @@ dir_remove (struct dir *dir, const char *name)
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
+  // printf("dir sector %d, name %s\n", dir->inode->sector, name);
   /* Find directory entry. */
-  if (!lookup (dir, name, &e, &ofs))
+  if (!lookup (dir, name, &e, &ofs)) {
+    // printf("NO SUCH FILE\n");
     goto done;
+  }
 
   /* Open inode. */
   inode = inode_open (e.inode_sector);
-  if (inode == NULL)
+  if (inode == NULL) {
+    // printf("NO INODE\n");
     goto done;
+  }
+
+  if (inode->isdir && !is_dir_empty(inode))
+  {
+    // printf("NOT EMPTY\n");
+    goto done;
+  }
+    
+
+  if (inode->isdir && inode->open_cnt > 2) //
+  {
+    // printf("inode open cnt %d\n", inode->open_cnt);
+    goto done;
+  }
 
   /* Erase directory entry. */
   e.in_use = false;
   if (inode_write_at (dir->inode, &e, sizeof e, ofs) != sizeof e) 
     goto done;
 
+  // printf("after condition\n");
+
   /* Remove inode. */
   inode_remove (inode);
   success = true;
 
+  // printf("inode %08x\n", inode);
+  // printf("isdir %d\n", inode->isdir);
+  // printf("inode->open_cnt %d\n", inode->open_cnt);
+
  done:
+  if (inode->isdir && inode->open_cnt == 2) {
+    inode_close(inode);
+  }
   inode_close (inode);
   return success;
 }
@@ -228,9 +277,233 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
       dir->pos += sizeof e;
       if (e.in_use)
         {
+          // printf("name %s\n", e.name);
           strlcpy (name, e.name, NAME_MAX + 1);
           return true;
         } 
     }
   return false;
+}
+
+
+struct dir *
+get_dir(char *path)
+{
+  char *name, *temp_name;
+  char *ptr, *ret;
+  struct dir *dir;
+  struct inode *inode;
+  disk_sector_t parent;
+  char *slash_front_name;
+  char *temp_ptr;
+
+
+  char *real_path = string_pre_processing(path);
+  // printf("path is %s, real_path is %s\n", path, real_path);
+
+  name = malloc((strlen(real_path)+1)*sizeof(char));
+  strlcpy(name, real_path, strlen(real_path)+1);
+  ptr = strrchr(name, '/');
+
+  if(ptr == NULL && !thread_current()->cur_dir) { // input path : abc, ., ..
+    free(real_path);
+    return dir_open_root();
+  }
+  else if(ptr == NULL)
+  {
+    if(strcmp(name, "..") == 0) // input path : ..
+    {
+      parent = thread_current()->cur_dir->inode->parent;
+      free(real_path);
+      return dir_open(inode_open(parent));
+    }
+    else // input path : abc, .
+    {
+      free(real_path);
+      return dir_reopen(thread_current()->cur_dir);
+    }
+  }
+
+  // if(ptr != name) // remove file name (only control path!) input : abc/def/123, output : abc/def
+  ptr[0] = '\0';
+
+  if((strlen(name) == 1 && name[0] == '/') || strlen(name) == 0) // root
+  {
+    free(real_path);
+    return dir_open_root();
+  }
+  
+  if(name[0] == '/') // input path : /abc, /123/abc  /a
+  {
+    dir = dir_open_root();
+    temp_name = name + 1;
+    ptr = strchr(temp_name, '/');
+    if (ptr == NULL)
+    {
+      if (!dir_lookup(dir, temp_name, &inode)) {
+        free(real_path);
+        return NULL;
+      }
+      dir_close(dir);
+      free(real_path);
+      return dir_open(inode);
+    } 
+    else
+    {
+      slash_front_name = malloc((strlen(temp_name) + 1) * sizeof(char));
+      strlcpy(slash_front_name, temp_name, strlen(temp_name)+1);
+      temp_ptr = strchr(slash_front_name, '/');
+      if (temp_ptr != NULL) {
+        temp_ptr[0] = '\0';
+      }
+      if (!dir_lookup(dir, slash_front_name, &inode)) {
+        free(slash_front_name);
+        free(real_path);
+        return NULL;
+      }
+      dir_close(dir);
+      dir = dir_open(inode);
+      free(slash_front_name);
+    }
+  }
+  else // input path : abc/def
+  {
+    ptr = strchr(name, '/'); 
+    dir = thread_current()->cur_dir;
+    if(!dir_lookup(dir, name, &inode))
+    {
+      free(real_path);
+      return NULL;
+    }
+
+    dir = dir_open(inode);
+  }
+
+  // printf("ptr is %s, name is %s\n", ptr, name);
+
+  while(ptr)
+  { //
+    ptr[0] = '\0';
+    temp_name = ptr + 1;
+    if(strcmp(temp_name, ".") == 0)
+    {
+      ptr = strchr(temp_name, '/');
+      continue;
+    }
+    if(strcmp(temp_name, "..") == 0)
+    {
+      parent = thread_current()->cur_dir->inode->parent;
+      dir_close(dir);
+      dir = dir_open(inode_open(parent));
+      ptr = strchr(temp_name, '/'); // abc/def
+      continue;
+    }
+
+    slash_front_name = malloc((strlen(temp_name) + 1) * sizeof(char));
+    strlcpy(slash_front_name, temp_name, strlen(temp_name)+1);
+
+    temp_ptr = strchr(slash_front_name, '/');
+    if (temp_ptr != NULL) {
+      temp_ptr[0] = '\0';
+    }
+    
+    if(!dir_lookup(dir, slash_front_name, &inode)) {
+      free(slash_front_name);
+      free(real_path);
+      return NULL;
+    }
+
+    dir_close(dir);
+    dir = dir_open(inode);
+    
+    //
+    free(slash_front_name);
+    ptr = strchr(temp_name, '/');
+  }
+
+  free(name);
+  free(real_path);
+  return dir;
+}
+
+char *
+get_name(char *path)
+{
+  char *real_path = string_pre_processing(path);
+  int path_len = strlen(real_path);
+  char name[path_len+1];
+  char *ptr, *ret;
+
+  strlcpy(name, real_path, path_len+1);
+  ptr = strrchr(name, '/');
+
+  if (ptr == NULL) {
+    ret = malloc(strlen(real_path)+1);
+    strlcpy(ret, real_path, strlen(real_path)+1);
+    return ret;
+  }
+
+  ptr += 1;
+
+  ret = malloc(strlen(ptr) * sizeof(char) + 1);
+  strlcpy(ret, ptr, strlen(ptr)+1);
+  free(real_path);
+  return ret;
+}
+
+
+bool is_dir_empty(struct inode *inode)
+{
+  struct dir_entry e;
+  off_t pos = 0;
+
+  while (inode_read_at (inode, &e, sizeof e, pos) == sizeof e) 
+    {
+      pos += sizeof e;
+      if (e.in_use)
+        {
+          return false;
+        } 
+    }
+  return true;
+}
+
+
+char *
+string_pre_processing(char * path) // input //a/b/c//d => /a/b/c/d
+{
+  char *ptr, *ret, *temp;
+  int cnt, i, len = 0;
+
+  temp = malloc(strlen(path) + 1);
+  ret = malloc(strlen(path) + 1);
+
+  // if(strlen(path) == 0)
+  //   return NULL;
+
+  strlcpy(temp, path, strlen(path) + 1);
+  ptr = strstr(temp, "//");
+  
+  while(ptr)
+  {
+    cnt = ptr - temp;
+    for(i=0; i<cnt+1; i++)
+    {
+      *(ret+len) = *(temp+i);
+      len++;
+    }
+    temp = ptr + 2;
+    ptr = strstr(temp, "//");
+  }
+
+  for(i=0; i<strlen(temp); i++)
+  {
+    *(ret+len) = *(temp+i);
+    len++;
+  }
+
+  *(ret+len) = '\0';
+
+  free(temp);
+  return ret;
 }

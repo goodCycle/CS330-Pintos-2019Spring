@@ -11,6 +11,12 @@
 #include "vm/frame.h"
 #include "vm/swap.h"
 #include "threads/palloc.h"
+#include "filesys/inode.h"
+#include "filesys/filesys.h"
+#include "filesys/directory.h"
+#include "filesys/file.h"
+
+#define READDIR_MAX_LEN 14
 
 static void syscall_handler (struct intr_frame *);
 int sys_write(int fd, const void *buffer, unsigned size);
@@ -144,6 +150,40 @@ syscall_handler (struct intr_frame *f UNUSED)
       munmap(*valid_mapid);
       break;
     }
+    case SYS_MKDIR:
+    {
+      int *valid_dir_addr = (int *)valid_pointer((void *)(f->esp+4)); 
+      int *valid_dir = (int *)valid_pointer((void *)*valid_dir_addr);
+      f->eax = mkdir((const char*)*valid_dir_addr);
+      break;
+    }
+    case SYS_CHDIR:
+    {
+      int *valid_dir_addr = (int *)valid_pointer((void *)(f->esp+4)); 
+      int *valid_dir = (int *)valid_pointer((void *)*valid_dir_addr);
+      f->eax = chdir((const char*)*valid_dir_addr);
+      break;
+    }
+    case SYS_ISDIR:
+    {
+      int *valid_fd = (int*)valid_pointer((void*)(f->esp+4));
+      f->eax = isdir(*valid_fd);
+      break;
+    }
+    case SYS_INUMBER:
+    {
+      int *valid_fd = (int*)valid_pointer((void*)(f->esp+4));
+      f->eax = inumber(*valid_fd);
+      break;
+    }
+    case SYS_READDIR:
+    {
+      int *valid_fd = (int*)valid_pointer((void*)(f->esp+4));
+      int *valid_name_addr = (int *)valid_pointer((void*)(f->esp+8));
+      int *valid_name = (int *)valid_pointer((void *)*valid_name_addr); // esp 안의 값(주소)가 valid한지 확인
+      f->eax = readdir(*valid_fd, (char *)*valid_name_addr);
+      break;
+    }
   }
 }
 
@@ -257,7 +297,11 @@ int wait (pid_t pid)
 
 bool create (const char *file, unsigned initial_size)
 {
-  return filesys_create (file, initial_size); 
+  bool return_value;
+  lock_acquire(&file_lock);
+  return_value = filesys_create (file, initial_size); 
+  lock_release(&file_lock);
+  return return_value;
 }
 
 bool remove (const char *file)
@@ -269,7 +313,7 @@ int open (const char *file)
 {
   //
   struct thread *curr = thread_current();
-  struct file_info *new_file_info = palloc_get_page(0); // we do not handle ended fd_info without meating syscall close? (close do page free !!!!!!!!!!!!)
+  struct file_info *new_file_info = palloc_get_page(0); // we do not handle ended fd_info without meeting syscall close? (close do page free !!!!!!!!!!!!)
 
   if(new_file_info == NULL){
     palloc_free_page(new_file_info);
@@ -279,6 +323,8 @@ int open (const char *file)
   lock_acquire(&file_lock);
   struct file *new_file = filesys_open(file);
   lock_release(&file_lock);
+
+  // printf("after open!\n");
 
   if (new_file == NULL) {
     return -1;
@@ -370,6 +416,7 @@ int read (int fd, void *buffer, unsigned size)
 int write (int fd, const void *buffer, unsigned length)
 {
   int i;
+  int num_write = -1;
   for(i=1;i<length/4096 + 1;i++)
     valid_pointer((void *)(buffer + i * 4096));
 
@@ -400,8 +447,12 @@ int write (int fd, const void *buffer, unsigned length)
     return -1;
   }
 
-  int num_write = file_write(fd_info->file, buffer, length);
-
+  if(!inode_isdir(file_get_inode(fd_info->file)))
+  {
+    // printf("inode is dir %d\n", inode_isdir(file_get_inode(fd_info->file)));
+    num_write = file_write(fd_info->file, buffer, length);
+  }
+    
   lock_release(&file_lock);
 
   return num_write;
@@ -664,4 +715,187 @@ void mummap_all()
 
   // frame table mapping을 지워주기
   frame_free_mapping_with_curr_thread(curr);
+}
+
+bool mkdir(const char *dir)
+{
+  if (strlen(dir) == 0) {
+    return false;
+  }
+  bool return_value;
+  lock_acquire (&file_lock);
+
+  return_value = filesys_create(dir, 0);
+  
+  struct dir *file_dir = get_dir(dir);
+  char *name = get_name(dir);
+  struct inode *inode;
+  if (!dir_lookup(file_dir, name, &inode)) {
+    dir_close(file_dir);
+    return false;
+  }
+  inode->isdir = 1;
+  inode->parent = inode_get_inumber(dir_get_inode(file_dir));
+  inode->path = dir;
+  // printf("child's parent sector is %zu\n", inode->parent);
+  // printf("inode open count %d\n", inode->open_cnt);
+  // inode_close(inode); // for dir_lookup  <<<<<<<<<<<<<<<<<<<<<<<<< 생각해보기
+  lock_release (&file_lock);
+  
+  // printf("dir open cnt %d\n", inode_open_cnt(dir_get_inode(file_dir)));
+
+  dir_close(file_dir); // for get_dir
+  free(name);
+  return return_value;
+}
+
+bool chdir(const char *dir)
+{
+  lock_acquire(&file_lock);
+
+  struct dir *file_dir = get_dir(dir);
+  struct dir *final_dir;
+  char *name = get_name(dir);
+  struct inode *inode;
+
+  // printf("dir sector : %zu\n", inode_get_inumber(dir_get_inode(file_dir)));
+
+  if(inode_get_inumber(dir_get_inode(file_dir)) == 1 && strlen(name) == 0) //root
+  {
+    dir_close(thread_current()->cur_dir);
+    final_dir = dir_open(dir_get_inode(file_dir));
+    thread_current()->cur_dir = final_dir;
+  }
+  else if(strcmp(name, ".") == 0)
+  {
+    dir_close(thread_current()->cur_dir);
+    dir_open(dir_get_inode(file_dir));
+    thread_current()->cur_dir = dir;
+  }
+  else if(strcmp(name, "..") == 0)
+  {
+    // final_dir = dir_open(inode_open(inode_parent(dir_get_inode(file_dir))));
+    final_dir = dir_reopen(file_dir);
+    dir_close(thread_current()->cur_dir);
+    thread_current()->cur_dir = final_dir;
+  }
+  else
+  {
+    if(!dir_lookup(file_dir, name, &inode))
+    {
+      lock_release(&file_lock);
+      return false;
+    }
+    final_dir = dir_open(inode);
+    dir_close(thread_current()->cur_dir);
+    thread_current()->cur_dir = final_dir;
+  }
+
+  dir_close(file_dir);
+  lock_release(&file_lock);
+  return true;
+}
+
+bool isdir (int fd)
+{
+  lock_acquire(&file_lock);
+  bool return_value;
+  struct thread *curr = thread_current();
+  struct list_elem *e, *next;
+  if (list_empty(&curr->fd_list)) {
+    lock_release(&file_lock);
+    return false;
+  }
+  struct file_info *fd_info;
+  int find = 0;
+  for (e=list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = next) {
+    next = list_next(e);
+    fd_info = list_entry(e, struct file_info, elem);
+    if (fd_info->fd == fd) {
+      find = 1;
+      break;
+    }
+  }
+  if (find == 0) {
+    lock_release(&file_lock);
+    return false;
+  }
+
+  return_value = inode_isdir(file_get_inode(fd_info->file));
+  lock_release(&file_lock);
+  return return_value;
+}
+
+int inumber (int fd)
+{
+  lock_acquire(&file_lock);
+  int return_value;
+  struct thread *curr = thread_current();
+  struct list_elem *e, *next;
+  if (list_empty(&curr->fd_list)) {
+    lock_release(&file_lock);
+    return -1;
+  }
+  struct file_info *fd_info;
+  int find = 0;
+  for (e=list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = next) {
+    next = list_next(e);
+    fd_info = list_entry(e, struct file_info, elem);
+    if (fd_info->fd == fd) {
+      find = 1;
+      break;
+    }
+  }
+  if (find == 0) {
+    lock_release(&file_lock);
+    return -1;
+  }
+
+  // printf("fd is %d, fd_info->file %08x, inode %08x, inumber %d\n",fd, fd_info->file, file_get_inode(fd_info->file), inode_get_inumber(file_get_inode(fd_info->file)));
+
+  return_value = inode_get_inumber(file_get_inode(fd_info->file));
+  lock_release(&file_lock);
+  return return_value;
+}
+
+bool
+readdir (int fd, char name[READDIR_MAX_LEN + 1]) 
+{
+  lock_acquire(&file_lock);
+  bool return_value;
+  struct thread *curr = thread_current();
+  struct list_elem *e, *next;
+  if (list_empty(&curr->fd_list)) {
+    lock_release(&file_lock);
+    return false;
+  }
+  struct file_info *fd_info;
+  int find = 0;
+  for (e=list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = next) {
+    next = list_next(e);
+    fd_info = list_entry(e, struct file_info, elem);
+    if (fd_info->fd == fd) {
+      find = 1;
+      break;
+    }
+  }
+  if (find == 0) {
+    lock_release(&file_lock);
+    return false;
+  }
+
+  struct inode *inode = file_get_inode(fd_info->file);
+  if (!inode_isdir(inode)) {
+    lock_release(&file_lock);
+    return false;
+  }
+
+  // struct dir *open_dir = dir_open(inode);
+  // return_value = dir_readdir (open_dir, name);
+  // dir_close(open_dir);
+  struct dir *open_dir = (struct dir*)fd_info->file;
+  return_value = dir_readdir(open_dir, name);
+
+  lock_release(&file_lock);
+  return return_value;
 }

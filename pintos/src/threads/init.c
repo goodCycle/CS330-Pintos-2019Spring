@@ -36,6 +36,10 @@
 #include "devices/disk.h"
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
+#include "filesys/cache.h"
+#include "vm/page.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
 #endif
 
 /* Amount of physical memory, in 4 kB pages. */

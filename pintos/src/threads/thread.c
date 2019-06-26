@@ -112,6 +112,7 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  initial_thread->cur_dir = NULL;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -217,6 +218,13 @@ thread_create (const char *name, int priority,
   struct thread *curr = thread_current();
   list_push_back(&curr->child_list, &t->child_elem);
   sema_down(&t->child_alive_sema);
+
+  // project4
+  if (curr->cur_dir) {
+    t->cur_dir = curr->cur_dir;
+  } else {
+    t->cur_dir = NULL;
+  }
 
   /* Add to run queue. */
   thread_unblock (t);

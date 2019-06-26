@@ -142,6 +142,9 @@ struct thread
 
     struct list mfile_list;
     mapid_t mapid;
+
+    // project4
+    struct dir *cur_dir;
   };
 
 /* If false (default), use round-robin scheduler.

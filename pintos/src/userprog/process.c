@@ -18,6 +18,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/page.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -114,6 +116,9 @@ start_process (void *f_name)
   // 
   if (success) {
     thread_current()->load_check = 1;
+    if (thread_current()->cur_dir == NULL) {
+      thread_current()->cur_dir = dir_open_root();
+    }
   } else {
     thread_current()->load_check = 0;
   }

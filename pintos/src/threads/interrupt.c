@@ -355,7 +355,7 @@ intr_handler (struct intr_frame *frame)
       yield_on_return = false;
     }
   else{
-    thread_current()->user_esp = frame->esp;
+    // thread_current()->user_esp = frame->esp;
   }
 
   /* Invoke the interrupt's handler. */
