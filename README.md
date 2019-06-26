@@ -1,7 +1,7 @@
 # CS330-Pintos-2019Spring
-This is the repository for implementing Pintos projects in KAIST 2019 spring CS330 project.
+This is the repository for implementing Pintos projects in ```KAIST 2019 Spring CS330```.
 
-Working with @dw95kim
+Working with [dw95kim](https://github.com/dw95kim)
 
 * Project 1 
   - Implement alarm clock, priority scheduling, advanced scheduler(BSD scheduler)
